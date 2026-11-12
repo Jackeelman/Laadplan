@@ -194,3 +194,16 @@ def test_dst_night_has_correct_number_of_quarters():
     now = datetime(2026, 3, 28, 18, 0, tzinfo=TZ)
     slots = p.candidate_quarters(now, p.next_deadline(now, time(7, 0)))
     assert len(slots) == 12 * 4
+
+
+def test_car_reports_completed_below_our_target():
+    # car stopped at its own 70% limit while we aim for 80%
+    plan = p.make_plan(base(soc_pct=70, car_done=True))
+    assert plan.mode == p.MODE_IDLE
+    assert plan.needed_kwh == 0 and plan.slots == []
+    assert "laadgrens van de auto" in plan.reason
+
+
+def test_car_completed_is_ignored_when_unplugged():
+    plan = p.make_plan(base(soc_pct=70, car_done=True, plugged_in=False))
+    assert plan.mode == p.MODE_PREVIEW

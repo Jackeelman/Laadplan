@@ -62,6 +62,7 @@ class PlanInput:
     night_start: time = time(22, 0)
     night_end: time = time(7, 0)
     fallback_kwh: float = 10.0  # used when the SoC is unknown
+    car_done: bool = False      # the car itself reports charging completed
 
 
 @dataclass
@@ -227,6 +228,11 @@ def make_plan(inp: PlanInput) -> Plan:
         )
     if needed <= 0.05:
         return Plan(MODE_IDLE, 0.0, 0, [], "Doel-SoC bereikt")
+    if inp.car_done:
+        # The car stopped on its own limit (or before our SoC reading caught
+        # up): nothing more will go in, so plan nothing and ask nothing.
+        return Plan(MODE_IDLE, 0.0, 0, [],
+                    "Auto meldt laden voltooid (eigen laadgrens van de auto bereikt)")
 
     if inp.strategy == STRATEGY_DIRECT:
         return Plan(MODE_DIRECT, needed, quarters, [], "Direct laden tot het doel")

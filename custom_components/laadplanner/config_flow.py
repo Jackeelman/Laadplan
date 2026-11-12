@@ -12,6 +12,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_CAPACITY,
+    CONF_CAR_STATUS,
     CONF_CHARGER_MODE,
     CONF_CHARGER_POWER,
     CONF_CHARGER_SWITCH,
@@ -26,6 +27,7 @@ from .const import (
     CONF_SOLAR_TOMORROW,
     DEFAULTS,
     DOMAIN,
+    OPTIONAL_ENTITIES,
 )
 
 _ENTITY_FIELDS = {
@@ -39,13 +41,14 @@ _ENTITY_FIELDS = {
     CONF_CHARGER_MODE: ["select"],
     CONF_CHARGER_SWITCH: ["switch"],
     CONF_CHARGER_POWER: ["sensor"],
+    CONF_CAR_STATUS: ["sensor", "binary_sensor"],
 }
 
 
 def _schema(values: dict[str, Any]) -> vol.Schema:
     fields: dict[Any, Any] = {}
     for key, domains in _ENTITY_FIELDS.items():
-        marker = vol.Optional if key == CONF_CHARGER_POWER else vol.Required
+        marker = vol.Optional if key in OPTIONAL_ENTITIES else vol.Required
         default = values.get(key, DEFAULTS[key])
         fields[marker(key, description={"suggested_value": default})] = (
             selector.EntitySelector(selector.EntitySelectorConfig(domain=domains))
@@ -62,9 +65,10 @@ def _schema(values: dict[str, Any]) -> vol.Schema:
 
 
 def _clean(user_input: dict[str, Any]) -> dict[str, Any]:
-    """Store an emptied optional field as "" so the default does not return."""
+    """Store emptied optional fields as "" so the default does not return."""
     data = dict(user_input)
-    data.setdefault(CONF_CHARGER_POWER, "")
+    for key in OPTIONAL_ENTITIES:
+        data.setdefault(key, "")
     return data
 
 

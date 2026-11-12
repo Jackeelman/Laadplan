@@ -7,6 +7,10 @@ STORAGE_VERSION = 1
 UPDATE_SECONDS = 60
 MIN_SWITCH_INTERVAL_S = 120  # never toggle the charger faster than this
 
+# Car charge status values meaning "the car stopped: its own limit is reached"
+CAR_DONE_STATES = {"completed", "complete", "charge_complete", "charging_complete",
+                   "charge_target_reached", "full", "fully_charged", "voltooid"}
+
 # Config entry keys (entities read from Home Assistant)
 CONF_SOC = "soc_entity"
 CONF_PLUG = "plug_entity"
@@ -18,9 +22,13 @@ CONF_EXPORT = "export_energy_entity"
 CONF_CHARGER_MODE = "charger_mode_entity"
 CONF_CHARGER_SWITCH = "charger_switch_entity"
 CONF_CHARGER_POWER = "charger_power_entity"
+CONF_CAR_STATUS = "car_charge_status_entity"
 CONF_CAPACITY = "capacity_kwh"
 CONF_GREEN_OPTION = "green_option"
 CONF_MANUAL_OPTION = "manual_option"
+
+# Entity fields that may be left empty
+OPTIONAL_ENTITIES = ("charger_power_entity", "car_charge_status_entity")
 
 DEFAULTS = {
     CONF_SOC: "sensor.fordpass_wf0rpbef9tsk88764_soc",
@@ -33,6 +41,7 @@ DEFAULTS = {
     CONF_CHARGER_MODE: "select.iq_ev_charger_1219_laadmodus",
     CONF_CHARGER_SWITCH: "switch.iq_ev_charger_1219",
     CONF_CHARGER_POWER: "sensor.iq_ev_charger_1219_vermogen",
+    CONF_CAR_STATUS: "sensor.fordpass_wf0rpbef9tsk88764_elvehcharging",
     CONF_CAPACITY: 77.0,
     CONF_GREEN_OPTION: "Groen",
     CONF_MANUAL_OPTION: "Handmatig",

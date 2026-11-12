@@ -191,3 +191,25 @@ async def test_optional_power_entity_can_be_cleared(hass: HomeAssistant) -> None
     await hass.async_block_till_done()
     entry = hass.config_entries.async_entries("laadplanner")[0]
     assert not entry.runtime_data.conf("charger_power_entity")
+
+
+async def test_car_own_limit_stops_planning(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    off = async_mock_service(hass, "switch", "turn_off")
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_soc", "70")
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_elvehcharging", "COMPLETED")
+    await entry.runtime_data.async_set("active", True)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.laadplanner_plan").state == "geen"
+    assert float(hass.states.get("sensor.laadplanner_resterende_vraag").state) == 0
+    assert [c.data["entity_id"] for c in off] == ["switch.iq_ev_charger_1219"]
+
+
+async def test_car_charging_status_keeps_planning(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_elvehcharging", "IN_PROGRESS")
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.laadplanner_plan").state in ("kwartieren", "zon_aanvullen")

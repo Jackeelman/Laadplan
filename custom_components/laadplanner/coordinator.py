@@ -16,7 +16,9 @@ from homeassistant.util import dt as dt_util
 
 from . import planner as pl
 from .const import (
+    CAR_DONE_STATES,
     CONF_CAPACITY,
+    CONF_CAR_STATUS,
     CONF_CHARGER_MODE,
     CONF_CHARGER_POWER,
     CONF_CHARGER_SWITCH,
@@ -242,6 +244,17 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         return state.state == STATE_ON or state.state.lower() in _PLUGGED_WORDS
 
+    def _car_done(self) -> bool:
+        """True if the car reports that it finished charging (own limit).
+
+        Only trusted while the charger sees the car plugged in; the car's
+        own plug status flickers and is not used.
+        """
+        state = self._state(CONF_CAR_STATUS)
+        if state is None or state.state in _BAD:
+            return False
+        return str(state.state).lower() in CAR_DONE_STATES
+
     def _learn_power(self) -> None:
         """Remember what the charger really delivers (it can't change mid-charge).
 
@@ -283,6 +296,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             charge_power_kw=power,
             deadline=deadline,
             plugged_in=self._plugged(),
+            car_done=self._car_done(),
             strategy=str(self.settings[SET_STRATEGY]),
             contract=str(self.settings[SET_CONTRACT]),
             prices=prices,

@@ -15,6 +15,7 @@
           "charger_mode_entity": "Charger mode",
           "charger_switch_entity": "Charger on/off",
           "charger_power_entity": "Charger power",
+          "car_charge_status_entity": "Car charge status (optional, detects the car's own limit)",
           "capacity_kwh": "Car battery capacity",
           "green_option": "Name of the green charge mode",
           "manual_option": "Name of the manual charge mode"
@@ -40,6 +41,7 @@
           "charger_mode_entity": "Charger mode",
           "charger_switch_entity": "Charger on/off",
           "charger_power_entity": "Charger power",
+          "car_charge_status_entity": "Car charge status (optional, detects the car's own limit)",
           "capacity_kwh": "Car battery capacity",
           "green_option": "Name of the green charge mode",
           "manual_option": "Name of the manual charge mode"
