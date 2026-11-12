@@ -9,7 +9,7 @@ planner never touches the current. It only decides *when* to charge
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta
 import math
 
@@ -30,6 +30,7 @@ MODE_SOLAR = "zon"            # charger in green mode, follows surplus itself
 MODE_SOLAR_TOPUP = "zon_aanvullen"  # green by day, top up in chosen quarters
 MODE_QUARTERS = "kwartieren"  # charge only in chosen quarters
 MODE_DIRECT = "direct"        # charge now until target
+MODE_PREVIEW = "voorlopig"    # car not plugged in: plan shown, never steered
 
 
 @dataclass
@@ -201,7 +202,24 @@ def make_plan(inp: PlanInput) -> Plan:
     quarters = quarters_for(needed, inp.charge_power_kw)
 
     if not inp.plugged_in:
-        return Plan(MODE_IDLE, needed, quarters, [], "Auto niet aangesloten")
+        if needed <= 0.05:
+            return Plan(MODE_IDLE, 0.0, 0, [], "Auto niet aangesloten, doel-SoC al bereikt")
+        # Show what would happen if the car were plugged in now; this plan is
+        # only for the dashboard and is never steered.
+        preview = make_plan(replace(inp, plugged_in=True))
+        if preview.mode == MODE_DIRECT:
+            how = "direct laden zodra de auto aangesloten is"
+        else:
+            how = preview.reason
+        return Plan(
+            MODE_PREVIEW,
+            preview.needed_kwh,
+            preview.quarters_needed,
+            preview.slots,
+            f"Voorlopig (auto niet aangesloten): {how}",
+            feasible=preview.feasible,
+            expected_surplus_kwh=preview.expected_surplus_kwh,
+        )
     if needed <= 0.05:
         return Plan(MODE_IDLE, 0.0, 0, [], "Doel-SoC bereikt")
 

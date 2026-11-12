@@ -44,9 +44,24 @@ def test_quarters_round_up():
     assert p.quarters_for(2.75, 11.0) == 1
 
 
-def test_not_plugged_in_is_idle():
+def test_not_plugged_in_gives_preview():
     plan = p.make_plan(base(plugged_in=False))
+    assert plan.mode == p.MODE_PREVIEW
+    assert len(plan.slots) == plan.quarters_needed == 13
+    assert plan.reason.startswith("Voorlopig")
+    # a preview is never steered
+    assert not plan.charge_now(datetime(2026, 11, 12, 22, 5, tzinfo=TZ))
+
+
+def test_not_plugged_in_and_full_is_idle():
+    plan = p.make_plan(base(plugged_in=False, soc_pct=85))
     assert plan.mode == p.MODE_IDLE and plan.slots == []
+
+
+def test_preview_of_direct_is_never_steered():
+    plan = p.make_plan(base(plugged_in=False, strategy=p.STRATEGY_DIRECT))
+    assert plan.mode == p.MODE_PREVIEW
+    assert not plan.charge_now(datetime(2026, 11, 12, 18, 7, tzinfo=TZ))
 
 
 def test_full_is_idle():

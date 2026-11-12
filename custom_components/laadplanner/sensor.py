@@ -17,7 +17,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import LaadplannerConfigEntry
 from .entity import LaadplannerEntity
-from .planner import MODE_DIRECT, MODE_IDLE, MODE_QUARTERS, MODE_SOLAR, MODE_SOLAR_TOPUP
+from .planner import (
+    MODE_DIRECT,
+    MODE_IDLE,
+    MODE_PREVIEW,
+    MODE_QUARTERS,
+    MODE_SOLAR,
+    MODE_SOLAR_TOPUP,
+)
 
 
 def _sim(key: str) -> Callable[[dict[str, Any]], Any]:
@@ -50,7 +57,7 @@ SENSORS = (
     PlannerSensorDescription(
         key="plan",
         device_class=SensorDeviceClass.ENUM,
-        options=[MODE_IDLE, MODE_SOLAR, MODE_SOLAR_TOPUP, MODE_QUARTERS, MODE_DIRECT],
+        options=[MODE_IDLE, MODE_PREVIEW, MODE_SOLAR, MODE_SOLAR_TOPUP, MODE_QUARTERS, MODE_DIRECT],
         value=lambda d: d["plan"].mode,
     ),
     PlannerSensorDescription(

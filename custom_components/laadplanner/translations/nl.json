@@ -113,6 +113,7 @@
         "name": "Plan",
         "state": {
           "geen": "Niets te doen",
+          "voorlopig": "Voorlopig plan",
           "zon": "Zon (Groen)",
           "zon_aanvullen": "Zon + aanvullen",
           "kwartieren": "Kwartieren",

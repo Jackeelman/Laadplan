@@ -110,3 +110,18 @@ async def test_current_is_never_changed(hass: HomeAssistant) -> None:
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert calls == []
+
+
+async def test_unplugged_active_shows_preview_and_never_steers(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    hass.states.async_set("binary_sensor.iq_ev_charger_1219_ingeplugd", "off")
+    on = async_mock_service(hass, "switch", "turn_on")
+    off = async_mock_service(hass, "switch", "turn_off")
+    sel = async_mock_service(hass, "select", "select_option")
+    await entry.runtime_data.async_set("active", True)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    plan = hass.states.get("sensor.laadplanner_plan")
+    assert plan.state == "voorlopig"
+    assert plan.attributes["kwartieren"]
+    assert on == [] and off == [] and sel == []

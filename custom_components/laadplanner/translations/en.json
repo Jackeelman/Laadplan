@@ -113,6 +113,7 @@
         "name": "Plan",
         "state": {
           "geen": "Nothing to do",
+          "voorlopig": "Preview plan",
           "zon": "Solar (green)",
           "zon_aanvullen": "Solar + top-up",
           "kwartieren": "Quarters",

@@ -314,7 +314,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         green = self.conf(CONF_GREEN_OPTION)
         manual = self.conf(CONF_MANUAL_OPTION)
 
-        if plan.mode == pl.MODE_IDLE:
+        if plan.mode in (pl.MODE_IDLE, pl.MODE_PREVIEW):
             return
         if plan.mode == pl.MODE_SOLAR:
             await self._set_mode(green)
