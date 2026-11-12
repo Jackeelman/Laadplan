@@ -61,6 +61,13 @@ def _schema(values: dict[str, Any]) -> vol.Schema:
     return vol.Schema(fields)
 
 
+def _clean(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Store an emptied optional field as "" so the default does not return."""
+    data = dict(user_input)
+    data.setdefault(CONF_CHARGER_POWER, "")
+    return data
+
+
 class LaadplannerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Set up Laadplanner."""
 
@@ -70,7 +77,7 @@ class LaadplannerConfigFlow(ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
         if user_input is not None:
-            return self.async_create_entry(title="Laadplanner", data=user_input)
+            return self.async_create_entry(title="Laadplanner", data=_clean(user_input))
         return self.async_show_form(step_id="user", data_schema=_schema({}))
 
     @staticmethod
@@ -84,6 +91,6 @@ class LaadplannerOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            return self.async_create_entry(data=_clean(user_input))
         current = {**self.config_entry.data, **self.config_entry.options}
         return self.async_show_form(step_id="init", data_schema=_schema(current))

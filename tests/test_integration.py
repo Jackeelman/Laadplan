@@ -6,6 +6,7 @@ import pytest
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from pytest_homeassistant_custom_component.common import async_mock_service
@@ -125,3 +126,68 @@ async def test_unplugged_active_shows_preview_and_never_steers(hass: HomeAssista
     assert plan.state == "voorlopig"
     assert plan.attributes["kwartieren"]
     assert on == [] and off == [] and sel == []
+
+
+async def test_target_reached_stops_manual_charge(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    off = async_mock_service(hass, "switch", "turn_off")
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_soc", "85")
+    await entry.runtime_data.async_set("active", True)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.laadplanner_plan").state == "geen"
+    assert [c.data["entity_id"] for c in off] == ["switch.iq_ev_charger_1219"]
+
+
+async def test_target_reached_leaves_green_mode_alone(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    off = async_mock_service(hass, "switch", "turn_off")
+    hass.states.async_set("select.iq_ev_charger_1219_laadmodus", "Groen",
+                          {"options": ["Handmatig", "Gepland", "Groen"]})
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_soc", "85")
+    await entry.runtime_data.async_set("active", True)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert off == []
+
+
+async def test_failing_charger_keeps_plan_available(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+
+    async def broken(call):
+        raise HomeAssistantError("laadpaal offline")
+
+    hass.services.async_register("switch", "turn_on", broken)
+    await entry.runtime_data.async_set("strategy", "direct")
+    await entry.runtime_data.async_set("active", True)
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert entry.runtime_data.last_update_success
+    assert hass.states.get("sensor.laadplanner_plan").state == "direct"
+
+
+async def test_simulation_is_saved_while_running(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    coordinator = entry.runtime_data
+    store = coordinator._store  # noqa: SLF001
+    calls = []
+    original = store.async_delay_save
+    store.async_delay_save = lambda func, delay=0: calls.append(delay) or original(func, delay)
+    for value in ("1001.0", "1002.0", "1003.0"):
+        hass.states.async_set("sensor.meterkast_p1_meter_hw_energie_import", value)
+        await coordinator.async_refresh()
+    # scheduled once, not pushed back on every update
+    assert len(calls) <= 1
+
+
+async def test_optional_power_entity_can_be_cleared(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    data = {k: v for k, v in DEFAULTS.items() if k != "charger_power_entity"}
+    result = await hass.config_entries.options.async_configure(result["flow_id"], data)
+    assert result["type"] == "create_entry"
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries("laadplanner")[0]
+    assert not entry.runtime_data.conf("charger_power_entity")

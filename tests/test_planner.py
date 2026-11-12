@@ -182,3 +182,15 @@ def test_short_night_fills_with_latest_evening_quarters():
     assert datetime(2026, 11, 13, 6, 0, tzinfo=TZ) in plan.slots
     assert datetime(2026, 11, 13, 5, 45, tzinfo=TZ) in plan.slots
     assert datetime(2026, 11, 12, 18, 0, tzinfo=TZ) not in plan.slots
+
+
+def test_dst_night_has_correct_number_of_quarters():
+    # 25 Oct 2026: clocks go back at 03:00, so 18:00 -> 07:00 lasts 14 hours
+    now = datetime(2026, 10, 24, 18, 0, tzinfo=TZ)
+    slots = p.candidate_quarters(now, p.next_deadline(now, time(7, 0)))
+    assert len(slots) == 14 * 4
+    assert len({s.timestamp() for s in slots}) == len(slots)
+    # 29 Mar 2026: clocks go forward at 02:00, so the night lasts 12 hours
+    now = datetime(2026, 3, 28, 18, 0, tzinfo=TZ)
+    slots = p.candidate_quarters(now, p.next_deadline(now, time(7, 0)))
+    assert len(slots) == 12 * 4

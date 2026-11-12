@@ -10,7 +10,7 @@ planner never touches the current. It only decides *when* to charge
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 import math
 
 QUARTER = timedelta(minutes=15)
@@ -140,10 +140,11 @@ def is_night(moment: datetime, night_start: time, night_end: time) -> bool:
 
 def candidate_quarters(now: datetime, deadline: datetime) -> list[datetime]:
     """All quarters that start now or later and end by the deadline."""
+    # Step in UTC so a DST change does not add or drop an hour of quarters.
     slots: list[datetime] = []
-    cursor = floor_quarter(now)
+    cursor = floor_quarter(now).astimezone(UTC)
     while cursor + QUARTER <= deadline:
-        slots.append(cursor)
+        slots.append(cursor.astimezone(now.tzinfo))
         cursor += QUARTER
     return slots
 
@@ -152,9 +153,9 @@ def _price_lookup(prices: list[PriceSlot]) -> dict[datetime, float]:
     """Map each quarter start to its price (hourly prices are spread out)."""
     lookup: dict[datetime, float] = {}
     for slot in prices:
-        cursor = floor_quarter(slot.start)
+        cursor = floor_quarter(slot.start).astimezone(UTC)
         while cursor < slot.end:
-            lookup[cursor] = slot.price
+            lookup[cursor.astimezone(slot.start.tzinfo)] = slot.price
             cursor += QUARTER
     return lookup
 

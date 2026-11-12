@@ -9,6 +9,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, State
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -143,6 +144,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.measured_power_kw: float | None = None
         self._last_switch: datetime | None = None
         self._last_power_update: datetime | None = None
+        self._save_scheduled = False
         self.plan: pl.Plan | None = None
 
     # -- config helpers -----------------------------------------------------
@@ -164,7 +166,25 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.measured_power_kw = stored.get("measured_power_kw")
 
     async def async_save(self) -> None:
+        # A direct save also cancels a pending delayed save.
+        self._save_scheduled = False
         await self._store.async_save(self._stored_data())
+
+    def _schedule_save(self) -> None:
+        """Write to the own .storage file at most once every 5 minutes.
+
+        Store.async_delay_save postpones a pending write on every call, so
+        calling it each minute would only ever write on shutdown (and lose
+        the simulation after a crash). Only schedule when nothing is pending.
+        """
+        if self._save_scheduled:
+            return
+        self._save_scheduled = True
+        self._store.async_delay_save(self._delayed_save_data, 300)
+
+    def _delayed_save_data(self) -> dict[str, Any]:
+        self._save_scheduled = False
+        return self._stored_data()
 
     async def async_set(self, key: str, value: Any) -> None:
         """Change a setting from one of the integration's entities."""
@@ -184,7 +204,11 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sim = self._simulate(now, prices)
 
         if self.settings.get(SET_ACTIVE):
-            await self._steer(plan, now)
+            try:
+                await self._steer(plan, now)
+            except HomeAssistantError as err:
+                # Keep the plan visible; try again next minute.
+                _LOGGER.warning("Laadplanner: sturen mislukt: %s", err)
 
         nxt = plan.next_start(now)
         return {
@@ -306,7 +330,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             sim["last_import"], sim["last_export"] = imp, exp
             # Batch writes to the own .storage file (not the recorder DB):
             # at most once every 5 minutes, and always on shutdown.
-            self._store.async_delay_save(self._stored_data, 300)
+            self._schedule_save()
         return dict(sim)
 
     def _stored_data(self) -> dict[str, Any]:
@@ -323,19 +347,32 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         green = self.conf(CONF_GREEN_OPTION)
         manual = self.conf(CONF_MANUAL_OPTION)
 
-        if plan.mode in (pl.MODE_IDLE, pl.MODE_PREVIEW):
+        if plan.mode == pl.MODE_PREVIEW:
+            return
+        if plan.mode == pl.MODE_IDLE:
+            # Target reached while plugged in: stop a manual charge that the
+            # planner started, otherwise it would charge past the target.
+            # Green mode is left alone (free solar is fine).
+            if self._plugged() and self._mode_is(manual):
+                await self._set_charging(False, now)
             return
         if plan.mode == pl.MODE_SOLAR:
             await self._set_mode(green)
             return
         if plan.mode == pl.MODE_SOLAR_TOPUP and not plan.charge_now(now):
-            # Green until the first top-up quarter; after that stay manual so
-            # the mode does not flip back and forth between quarters.
-            if not plan.slots or now < min(plan.slots):
+            # Green before the first and after the last top-up quarter; in
+            # between stay manual so the mode does not flip between quarters.
+            if (not plan.slots or now < min(plan.slots)
+                    or plan.next_start(now) is None):
                 await self._set_mode(green)
                 return
         await self._set_mode(manual)
         await self._set_charging(plan.charge_now(now), now)
+
+    def _mode_is(self, option: str) -> bool:
+        entity_id = self.conf(CONF_CHARGER_MODE)
+        state = self.hass.states.get(entity_id) if entity_id else None
+        return state is not None and state.state == option
 
     async def _set_mode(self, option: str) -> None:
         entity_id = self.conf(CONF_CHARGER_MODE)
