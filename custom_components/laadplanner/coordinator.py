@@ -147,6 +147,9 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_switch: datetime | None = None
         self._last_power_update: datetime | None = None
         self._save_scheduled = False
+        self._sim_shown: dict[str, Any] = {}
+        self._sim_shown_quarter: datetime | None = None
+        self._steer_failing = False
         self.plan: pl.Plan | None = None
 
     # -- config helpers -----------------------------------------------------
@@ -191,6 +194,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_set(self, key: str, value: Any) -> None:
         """Change a setting from one of the integration's entities."""
         self.settings[key] = value
+        self._sim_shown_quarter = None  # show new tariffs' effect right away
         await self.async_save()
         await self.async_request_refresh()
 
@@ -204,13 +208,29 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         plan = pl.make_plan(plan_input)
         self.plan = plan
         sim = self._simulate(now, prices)
+        # The cost sensors change almost every minute by a cent. Show them
+        # once per quarter (the price interval) to keep the recorder small;
+        # the counting itself still happens every minute.
+        quarter = pl.floor_quarter(now)
+        if quarter != self._sim_shown_quarter:
+            self._sim_shown = sim
+            self._sim_shown_quarter = quarter
 
         if self.settings.get(SET_ACTIVE):
             try:
                 await self._steer(plan, now)
             except HomeAssistantError as err:
-                # Keep the plan visible; try again next minute.
-                _LOGGER.warning("Laadplanner: sturen mislukt: %s", err)
+                # Keep the plan visible and try again next minute, but warn
+                # only once per outage so the log does not fill up.
+                if not self._steer_failing:
+                    _LOGGER.warning("Laadplanner: sturen mislukt: %s", err)
+                else:
+                    _LOGGER.debug("Laadplanner: sturen nog steeds mislukt: %s", err)
+                self._steer_failing = True
+            else:
+                if self._steer_failing:
+                    _LOGGER.info("Laadplanner: sturen werkt weer")
+                self._steer_failing = False
 
         nxt = plan.next_start(now)
         return {
@@ -221,7 +241,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "power_kw": plan_input.charge_power_kw,
             "solar_before_deadline": plan_input.solar_before_deadline_kwh,
             "prices_known": len(prices),
-            "sim": sim,
+            "sim": self._sim_shown,
         }
 
     def _setting_time(self, key: str, default: time) -> time:
