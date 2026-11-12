@@ -52,6 +52,7 @@ SET_SURPLUS = "surplus_factor"
 SET_POWER = "charge_power_kw"
 SET_EFFICIENCY = "efficiency"
 SET_FALLBACK = "fallback_kwh"
+SET_NIGHT_START = "night_start"
 
 SETTING_DEFAULTS = {
     SET_STRATEGY: "automatisch",
@@ -67,4 +68,5 @@ SETTING_DEFAULTS = {
     SET_POWER: 11.0,
     SET_EFFICIENCY: 0.9,
     SET_FALLBACK: 10.0,
+    SET_NIGHT_START: "00:00",   # charge from here (everyone asleep)
 }

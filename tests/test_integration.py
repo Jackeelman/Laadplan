@@ -54,7 +54,7 @@ async def test_setup_creates_entities_in_shadow_mode(hass: HomeAssistant) -> Non
     ids = {s.entity_id for s in hass.states.async_all() if "laadplanner" in s.entity_id}
     for expected in ("sensor.laadplanner_plan", "sensor.laadplanner_resterende_vraag",
                      "select.laadplanner_strategie", "switch.laadplanner_sturing_actief",
-                     "time.laadplanner_deadline", "number.laadplanner_doel_soc"):
+                     "time.laadplanner_deadline", "time.laadplanner_laden_vanaf", "number.laadplanner_doel_soc"):
         assert expected in ids, ids
     plan = hass.states.get("sensor.laadplanner_plan")
     assert plan.state in ("kwartieren", "zon_aanvullen")

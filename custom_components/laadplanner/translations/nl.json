@@ -98,6 +98,9 @@
     "time": {
       "deadline": {
         "name": "Klaar om"
+      },
+      "laden_vanaf": {
+        "name": "Laden vanaf"
       }
     },
     "switch": {

@@ -40,6 +40,7 @@ from .const import (
     SET_FALLBACK,
     SET_FIXED_EXPORT,
     SET_FIXED_IMPORT,
+    SET_NIGHT_START,
     SET_POWER,
     SET_STRATEGY,
     SET_SURPLUS,
@@ -197,13 +198,19 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "sim": sim,
         }
 
-    def _deadline_time(self) -> time:
-        raw = str(self.settings.get(SET_DEADLINE, "07:00"))
+    def _setting_time(self, key: str, default: time) -> time:
+        raw = str(self.settings.get(key, default.strftime("%H:%M")))
         try:
             hour, minute = raw.split(":")[:2]
             return time(int(hour), int(minute))
         except ValueError:
-            return time(7, 0)
+            return default
+
+    def _deadline_time(self) -> time:
+        return self._setting_time(SET_DEADLINE, time(7, 0))
+
+    def _night_start_time(self) -> time:
+        return self._setting_time(SET_NIGHT_START, time(0, 0))
 
     def _plugged(self) -> bool:
         state = self._state(CONF_PLUG)
@@ -258,6 +265,8 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             solar_before_deadline_kwh=solar,
             solar_surplus_factor=float(self.settings[SET_SURPLUS]),
             fallback_kwh=float(self.settings[SET_FALLBACK]),
+            night_start=self._night_start_time(),
+            night_end=self._deadline_time(),
         )
 
     # -- simulation -----------------------------------------------------------

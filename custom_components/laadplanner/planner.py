@@ -189,9 +189,13 @@ def pick_quarters(
         if any(s in unpriced for s in chosen):
             how += " (deels zonder bekende prijs, nacht gekozen)"
     else:
-        ordered = sorted(candidates, key=lambda s: (not night(s), s))
-        chosen = ordered[:count]
-        how = "nachtkwartieren (vast tarief, tijdstip maakt niet uit voor de prijs)"
+        # Night quarters in time order; if the night is too short, take the
+        # evening quarters closest to the night (latest first).
+        nights = sorted(s for s in candidates if night(s))
+        others = sorted((s for s in candidates if not night(s)), reverse=True)
+        chosen = (nights + others)[:count]
+        how = (f"nachtkwartieren vanaf {inp.night_start.strftime('%H:%M')} "
+               "(vast tarief, tijdstip maakt niet uit voor de prijs)")
 
     return sorted(chosen), how
 

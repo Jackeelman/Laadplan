@@ -166,3 +166,19 @@ def test_quarter_costs():
     assert abs(dyn - (0.25 - 0.04)) < 1e-9
     fixed, dyn = p.quarter_costs(1.0, 0.0, None, t)
     assert dyn is None
+
+
+def test_fixed_contract_starts_at_configured_night_start():
+    plan = p.make_plan(base(night_start=time(0, 0)))
+    assert plan.slots[0] == datetime(2026, 11, 13, 0, 0, tzinfo=TZ)
+    assert all(s.hour < 7 for s in plan.slots)
+    assert "vanaf 00:00" in plan.reason
+
+
+def test_short_night_fills_with_latest_evening_quarters():
+    # needs 13 quarters but the night (06:00-07:00) only has 4
+    plan = p.make_plan(base(night_start=time(6, 0)))
+    assert plan.feasible
+    assert datetime(2026, 11, 13, 6, 0, tzinfo=TZ) in plan.slots
+    assert datetime(2026, 11, 13, 5, 45, tzinfo=TZ) in plan.slots
+    assert datetime(2026, 11, 12, 18, 0, tzinfo=TZ) not in plan.slots

@@ -98,6 +98,9 @@
     "time": {
       "deadline": {
         "name": "Ready at"
+      },
+      "laden_vanaf": {
+        "name": "Charge from"
       }
     },
     "switch": {
