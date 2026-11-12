@@ -66,6 +66,15 @@ In Omnibattery bij het uitgesloten apparaat *IQ-lader*:
 | `time.laadplanner_laden_vanaf` | Vanaf hoe laat 's nachts geladen mag worden (standaard 00:00) |
 | `switch.laadplanner_sturing_actief` | Uit = schaduwmodus |
 
+## Log en database
+
+De module houdt de Home Assistant-database en het log klein:
+
+- De kostensensoren tellen elke minuut mee, maar tonen hun waarde **eens per kwartier**. Dat zijn hooguit 96 regels per sensor per dag in plaats van honderden.
+- De attributen van `sensor.laadplanner_plan` (reden, kwartieren, enz.) komen niet in de geschiedenis. Getallen worden afgerond op 0,1, zodat ze niet elke minuut een nieuwe regel opleveren.
+- Instellingen en de kostentelling staan in een eigen klein bestand (`.storage`), niet in de database. Dat bestand wordt hooguit eens per 5 minuten geschreven.
+- Lukt het sturen van de laadpaal niet, dan komt er **één** waarschuwing in het log, niet elke minuut. Werkt het weer, dan staat dat er ook (op info-niveau).
+
 ## Overstappen naar sturen (fase 3)
 
 Eerst de EV-sturing in SlimLaden op Homey uitzetten, dan pas `switch.laadplanner_sturing_actief` aan. Nooit twee systemen tegelijk aan de laadpaal of de accu's.

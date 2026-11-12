@@ -85,11 +85,12 @@ async def test_active_direct_switches_charger_on(hass: HomeAssistant) -> None:
     assert [c.data["entity_id"] for c in calls] == ["switch.iq_ev_charger_1219"]
 
 
-async def test_simulation_counts_costs(hass: HomeAssistant) -> None:
+async def test_simulation_counts_costs(hass: HomeAssistant, freezer) -> None:
     entry = await _setup(hass)
     coordinator = entry.runtime_data
     await coordinator.async_set("fixed_import", 0.30)
     hass.states.async_set("sensor.meterkast_p1_meter_hw_energie_import", "1001.0")
+    freezer.tick(timedelta(minutes=15))
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     fixed = float(hass.states.get("sensor.laadplanner_kosten_vast_vandaag").state)
@@ -213,3 +214,43 @@ async def test_car_charging_status_keeps_planning(hass: HomeAssistant) -> None:
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert hass.states.get("sensor.laadplanner_plan").state in ("kwartieren", "zon_aanvullen")
+
+
+async def test_cost_sensors_update_once_per_quarter(hass: HomeAssistant, freezer) -> None:
+    freezer.move_to("2026-11-12 18:01:00+01:00")
+    entry = await _setup(hass)
+    coordinator = entry.runtime_data
+    await coordinator.async_set("fixed_import", 0.30)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    before = hass.states.get("sensor.laadplanner_kosten_vast_vandaag").state
+    hass.states.async_set("sensor.meterkast_p1_meter_hw_energie_import", "1001.0")
+    freezer.tick(timedelta(minutes=1))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    # counted, but not shown yet: no extra database row this minute
+    assert abs(coordinator.sim["fixed_day"] - 0.30) < 1e-6
+    assert hass.states.get("sensor.laadplanner_kosten_vast_vandaag").state == before
+    freezer.move_to("2026-11-12 18:15:00+01:00")
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert float(hass.states.get("sensor.laadplanner_kosten_vast_vandaag").state) == 0.30
+
+
+async def test_steering_failure_warns_once(hass: HomeAssistant, caplog) -> None:
+    entry = await _setup(hass)
+
+    async def broken(call):
+        raise HomeAssistantError("laadpaal offline")
+
+    hass.services.async_register("switch", "turn_on", broken)
+    coordinator = entry.runtime_data
+    await coordinator.async_set("strategy", "direct")
+    await coordinator.async_set("active", True)
+    caplog.clear()
+    for _ in range(3):
+        coordinator._last_switch = None  # noqa: SLF001
+        await coordinator.async_refresh()
+    warnings = [r for r in caplog.records
+                if r.levelname == "WARNING" and "sturen mislukt" in r.getMessage()]
+    assert len(warnings) == 1

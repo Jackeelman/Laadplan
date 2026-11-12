@@ -52,7 +52,7 @@ SENSORS = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         suggested_display_precision=1,
-        value=lambda d: round(d["plan"].needed_kwh, 2),
+        value=lambda d: round(d["plan"].needed_kwh, 1),
     ),
     PlannerSensorDescription(
         key="plan",
@@ -138,14 +138,16 @@ class PlannerSensor(LaadplannerEntity, SensorEntity):
             return {
                 "reden": plan.reason,
                 "haalbaar": plan.feasible,
-                "benodigd_kwh": round(plan.needed_kwh, 2),
+                "benodigd_kwh": round(plan.needed_kwh, 1),
                 "kwartieren_nodig": plan.quarters_needed,
                 "kwartieren": [s.isoformat() for s in plan.slots],
                 "nu_laden": data["charge_now"],
-                "verwacht_overschot_kwh": round(plan.expected_surplus_kwh, 2),
-                "zon_voor_deadline_kwh": round(data["solar_before_deadline"], 2),
+                # 0.1 precision: finer values change every minute by day and
+                # would write a new state row to the database each time.
+                "verwacht_overschot_kwh": round(plan.expected_surplus_kwh, 1),
+                "zon_voor_deadline_kwh": round(data["solar_before_deadline"], 1),
                 "deadline": data["deadline"].isoformat(),
-                "laadvermogen_kw": round(data["power_kw"], 2),
+                "laadvermogen_kw": round(data["power_kw"], 1),
                 "bekende_prijzen": data["prices_known"],
                 "sturing_actief": bool(self.coordinator.settings.get("active")),
             }
