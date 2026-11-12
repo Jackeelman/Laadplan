@@ -10,6 +10,7 @@ Eigen EV-module voor Home Assistant, naast Omnibattery. Plant wanneer de auto la
 - Verandert **nooit de laadstroom**: dat kan niet tijdens het laden. Hij rekent met het vermogen dat de paal in eerdere sessies haalde.
 - De fasekeuze (1/3) laat hij aan de paal.
 - Schakelt de paal hooguit eens per 2 minuten.
+- Is het doel bereikt terwijl de paal op `Handmatig` laadt, dan zet hij de paal uit. Op `Groen` laat hij de paal met rust.
 - Het vermogen van de paal komt traag uit de Enphase-cloud; dat wordt alleen gebruikt om het gemiddelde laadvermogen te leren.
 
 ## Installeren
@@ -60,6 +61,7 @@ In Omnibattery bij het uitgesloten apparaat *IQ-lader*:
 | `sensor.laadplanner_verschil_dynamisch_maand` | Wat dynamisch deze maand had gescheeld (positief = dynamisch goedkoper) |
 | `select.laadplanner_strategie`, `select.laadplanner_contract` | Instellingen |
 | `number.laadplanner_doel_soc`, `time.laadplanner_deadline` | Doel en deadline |
+| `time.laadplanner_laden_vanaf` | Vanaf hoe laat 's nachts geladen mag worden (standaard 00:00) |
 | `switch.laadplanner_sturing_actief` | Uit = schaduwmodus |
 
 ## Overstappen naar sturen (fase 3)
@@ -69,7 +71,8 @@ Eerst de EV-sturing in SlimLaden op Homey uitzetten, dan pas `switch.laadplanner
 ## Bekende beperkingen
 
 - De zonvoorspelling geeft alleen dagtotalen. Het deel van morgen vóór de deadline wordt lineair geschat over 08:00–17:00.
-- Bij een vast contract met één tarief kiest hij nachtkwartieren vanaf 22:00.
+- Bij een vast contract met één tarief kiest hij nachtkwartieren vanaf `Laden vanaf` (standaard 00:00) tot de deadline. Is die nacht te kort, dan vult hij aan met de avondkwartieren direct ervoor.
+- `Laadvermogen (startwaarde)` wordt alleen gebruikt tot de module zelf het echte vermogen van de paal heeft geleerd.
 
 ## Tests
 
