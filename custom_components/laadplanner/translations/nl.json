@@ -15,6 +15,7 @@
           "charger_mode_entity": "Laadmodus laadpaal",
           "charger_switch_entity": "Laadpaal aan/uit",
           "charger_power_entity": "Laadvermogen laadpaal",
+          "car_charge_status_entity": "Laadstatus auto (optioneel, herkent de eigen laadgrens van de auto)",
           "capacity_kwh": "Accucapaciteit auto",
           "green_option": "Naam van de groene laadmodus",
           "manual_option": "Naam van de handmatige laadmodus"
@@ -40,6 +41,7 @@
           "charger_mode_entity": "Laadmodus laadpaal",
           "charger_switch_entity": "Laadpaal aan/uit",
           "charger_power_entity": "Laadvermogen laadpaal",
+          "car_charge_status_entity": "Laadstatus auto (optioneel, herkent de eigen laadgrens van de auto)",
           "capacity_kwh": "Accucapaciteit auto",
           "green_option": "Naam van de groene laadmodus",
           "manual_option": "Naam van de handmatige laadmodus"
