@@ -10,7 +10,7 @@ Eigen EV-module voor Home Assistant, naast Omnibattery. Plant wanneer de auto la
 - Verandert **nooit de laadstroom**: dat kan niet tijdens het laden. Hij rekent met het vermogen dat de paal in eerdere sessies haalde.
 - De fasekeuze (1/3) laat hij aan de paal.
 - Schakelt de paal hooguit eens per 2 minuten.
-- **Laadgrens van de auto:** meldt de auto `COMPLETED` terwijl hij aangesloten is, dan geldt hij als vol, ook als de doel-SoC hoger staat of de SoC-sensor nog achterloopt. De resterende vraag gaat dan naar 0. Zet de laadgrens in de auto dus gelijk aan of hoger dan de doel-SoC als je tot het doel wilt laden.
+- **Laadgrens van de auto:** meldt de auto `COMPLETED` terwijl hij aangesloten is, dan geldt hij als vol, ook als de doel-SoC hoger staat of de SoC-sensor nog achterloopt. De resterende vraag gaat dan naar 0. Zet de laadgrens in de auto dus gelijk aan of hoger dan de doel-SoC als je tot het doel wilt laden. Een `COMPLETED` telt alleen als FordPass **na het aansluiten** ververst is; een oude melding van de vorige laadbeurt wordt genegeerd. Bij twijfel (bijv. net na een herstart van HA) plant hij gewoon laden.
 - Is het doel bereikt terwijl de paal op `Handmatig` laadt, dan zet hij de paal uit. Op `Groen` laat hij de paal met rust.
 - Het vermogen van de paal komt traag uit de Enphase-cloud; dat wordt alleen gebruikt om het gemiddelde laadvermogen te leren.
 
@@ -32,6 +32,7 @@ Daarna: **Instellingen → Apparaten en diensten → Integratie toevoegen → La
 | Laadmodus / aan-uit | `select.iq_ev_charger_1219_laadmodus` / `switch.iq_ev_charger_1219` |
 | Laadvermogen (optioneel) | `sensor.iq_ev_charger_1219_vermogen` |
 | Laadstatus auto (optioneel) | `sensor.fordpass_wf0rpbef9tsk88764_elvehcharging` |
+| Auto laatst vernieuwd (optioneel) | `sensor.fordpass_wf0rpbef9tsk88764_lastrefresh` |
 
 ## Na installatie instellen
 

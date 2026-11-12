@@ -23,12 +23,17 @@ CONF_CHARGER_MODE = "charger_mode_entity"
 CONF_CHARGER_SWITCH = "charger_switch_entity"
 CONF_CHARGER_POWER = "charger_power_entity"
 CONF_CAR_STATUS = "car_charge_status_entity"
+CONF_CAR_REFRESH = "car_last_refresh_entity"
 CONF_CAPACITY = "capacity_kwh"
 CONF_GREEN_OPTION = "green_option"
 CONF_MANUAL_OPTION = "manual_option"
 
 # Entity fields that may be left empty
-OPTIONAL_ENTITIES = ("charger_power_entity", "car_charge_status_entity")
+OPTIONAL_ENTITIES = (
+    "charger_power_entity",
+    "car_charge_status_entity",
+    "car_last_refresh_entity",
+)
 
 DEFAULTS = {
     CONF_SOC: "sensor.fordpass_wf0rpbef9tsk88764_soc",
@@ -42,6 +47,7 @@ DEFAULTS = {
     CONF_CHARGER_SWITCH: "switch.iq_ev_charger_1219",
     CONF_CHARGER_POWER: "sensor.iq_ev_charger_1219_vermogen",
     CONF_CAR_STATUS: "sensor.fordpass_wf0rpbef9tsk88764_elvehcharging",
+    CONF_CAR_REFRESH: "sensor.fordpass_wf0rpbef9tsk88764_lastrefresh",
     CONF_CAPACITY: 77.0,
     CONF_GREEN_OPTION: "Groen",
     CONF_MANUAL_OPTION: "Handmatig",

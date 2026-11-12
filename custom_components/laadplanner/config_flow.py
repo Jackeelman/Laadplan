@@ -12,6 +12,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_CAPACITY,
+    CONF_CAR_REFRESH,
     CONF_CAR_STATUS,
     CONF_CHARGER_MODE,
     CONF_CHARGER_POWER,
@@ -42,6 +43,7 @@ _ENTITY_FIELDS = {
     CONF_CHARGER_SWITCH: ["switch"],
     CONF_CHARGER_POWER: ["sensor"],
     CONF_CAR_STATUS: ["sensor", "binary_sensor"],
+    CONF_CAR_REFRESH: ["sensor"],
 }
 
 
