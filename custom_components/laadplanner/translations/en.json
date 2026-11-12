@@ -1,0 +1,142 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Laadplanner",
+        "description": "Pick the entities. Control is off by default (shadow mode).",
+        "data": {
+          "soc_entity": "Car state of charge (%)",
+          "plug_entity": "Car plugged in",
+          "price_entity": "Price sensor (Nord Pool or Zonneplan)",
+          "solar_remaining_today_entity": "Solar forecast remaining today (kWh)",
+          "solar_tomorrow_entity": "Solar forecast tomorrow (kWh)",
+          "import_energy_entity": "P1 energy import (kWh, total)",
+          "export_energy_entity": "P1 energy export (kWh, total)",
+          "charger_mode_entity": "Charger mode",
+          "charger_switch_entity": "Charger on/off",
+          "charger_power_entity": "Charger power",
+          "capacity_kwh": "Car battery capacity",
+          "green_option": "Name of the green charge mode",
+          "manual_option": "Name of the manual charge mode"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Laadplanner is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Laadplanner",
+        "data": {
+          "soc_entity": "Car state of charge (%)",
+          "plug_entity": "Car plugged in",
+          "price_entity": "Price sensor (Nord Pool or Zonneplan)",
+          "solar_remaining_today_entity": "Solar forecast remaining today (kWh)",
+          "solar_tomorrow_entity": "Solar forecast tomorrow (kWh)",
+          "import_energy_entity": "P1 energy import (kWh, total)",
+          "export_energy_entity": "P1 energy export (kWh, total)",
+          "charger_mode_entity": "Charger mode",
+          "charger_switch_entity": "Charger on/off",
+          "charger_power_entity": "Charger power",
+          "capacity_kwh": "Car battery capacity",
+          "green_option": "Name of the green charge mode",
+          "manual_option": "Name of the manual charge mode"
+        }
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "strategie": {
+        "name": "Strategy",
+        "state": {
+          "automatisch": "Automatic",
+          "zon": "Solar",
+          "kwartieren": "Quarters",
+          "direct": "Direct"
+        }
+      },
+      "contract": {
+        "name": "Contract",
+        "state": {
+          "vast": "Fixed",
+          "dynamisch": "Dynamic"
+        }
+      }
+    },
+    "number": {
+      "doel_soc": {
+        "name": "Target SoC"
+      },
+      "vast_tarief_inkoop": {
+        "name": "Fixed import tariff"
+      },
+      "vast_tarief_teruglevering": {
+        "name": "Fixed export tariff"
+      },
+      "dynamisch_opslag_inkoop": {
+        "name": "Dynamic import markup"
+      },
+      "dynamisch_opslag_teruglevering": {
+        "name": "Dynamic export deduction"
+      },
+      "zon_overschot_factor": {
+        "name": "Share of solar that is surplus"
+      },
+      "laadvermogen": {
+        "name": "Charge power (initial)"
+      },
+      "laadrendement": {
+        "name": "Charging efficiency"
+      },
+      "vaste_hoeveelheid": {
+        "name": "Fixed amount without SoC"
+      }
+    },
+    "time": {
+      "deadline": {
+        "name": "Ready at"
+      }
+    },
+    "switch": {
+      "sturing_actief": {
+        "name": "Control active"
+      }
+    },
+    "sensor": {
+      "resterende_vraag": {
+        "name": "Remaining EV demand"
+      },
+      "plan": {
+        "name": "Plan",
+        "state": {
+          "geen": "Nothing to do",
+          "zon": "Solar (green)",
+          "zon_aanvullen": "Solar + top-up",
+          "kwartieren": "Quarters",
+          "direct": "Direct"
+        }
+      },
+      "volgende_start": {
+        "name": "Next start"
+      },
+      "kosten_vast_vandaag": {
+        "name": "Cost fixed today"
+      },
+      "kosten_dynamisch_vandaag": {
+        "name": "Cost dynamic today"
+      },
+      "kosten_vast_maand": {
+        "name": "Cost fixed this month"
+      },
+      "kosten_dynamisch_maand": {
+        "name": "Cost dynamic this month"
+      },
+      "verschil_dynamisch_maand": {
+        "name": "Dynamic saving this month"
+      }
+    }
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Laadplanner",
+        "description": "Kies de entiteiten. De sturing staat standaard uit (schaduwmodus).",
+        "data": {
+          "soc_entity": "Laadtoestand auto (%)",
+          "plug_entity": "Auto aangesloten",
+          "price_entity": "Prijssensor (Nord Pool of Zonneplan)",
+          "solar_remaining_today_entity": "Zonvoorspelling resterend vandaag (kWh)",
+          "solar_tomorrow_entity": "Zonvoorspelling morgen (kWh)",
+          "import_energy_entity": "P1 energie import (kWh, totaal)",
+          "export_energy_entity": "P1 energie export (kWh, totaal)",
+          "charger_mode_entity": "Laadmodus laadpaal",
+          "charger_switch_entity": "Laadpaal aan/uit",
+          "charger_power_entity": "Laadvermogen laadpaal",
+          "capacity_kwh": "Accucapaciteit auto",
+          "green_option": "Naam van de groene laadmodus",
+          "manual_option": "Naam van de handmatige laadmodus"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Laadplanner is al ingesteld"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Laadplanner",
+        "data": {
+          "soc_entity": "Laadtoestand auto (%)",
+          "plug_entity": "Auto aangesloten",
+          "price_entity": "Prijssensor (Nord Pool of Zonneplan)",
+          "solar_remaining_today_entity": "Zonvoorspelling resterend vandaag (kWh)",
+          "solar_tomorrow_entity": "Zonvoorspelling morgen (kWh)",
+          "import_energy_entity": "P1 energie import (kWh, totaal)",
+          "export_energy_entity": "P1 energie export (kWh, totaal)",
+          "charger_mode_entity": "Laadmodus laadpaal",
+          "charger_switch_entity": "Laadpaal aan/uit",
+          "charger_power_entity": "Laadvermogen laadpaal",
+          "capacity_kwh": "Accucapaciteit auto",
+          "green_option": "Naam van de groene laadmodus",
+          "manual_option": "Naam van de handmatige laadmodus"
+        }
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "strategie": {
+        "name": "Strategie",
+        "state": {
+          "automatisch": "Automatisch",
+          "zon": "Zon",
+          "kwartieren": "Kwartieren",
+          "direct": "Direct"
+        }
+      },
+      "contract": {
+        "name": "Contract",
+        "state": {
+          "vast": "Vast",
+          "dynamisch": "Dynamisch"
+        }
+      }
+    },
+    "number": {
+      "doel_soc": {
+        "name": "Doel-SoC"
+      },
+      "vast_tarief_inkoop": {
+        "name": "Vast tarief inkoop"
+      },
+      "vast_tarief_teruglevering": {
+        "name": "Vast tarief teruglevering"
+      },
+      "dynamisch_opslag_inkoop": {
+        "name": "Dynamisch opslag inkoop"
+      },
+      "dynamisch_opslag_teruglevering": {
+        "name": "Dynamisch aftrek teruglevering"
+      },
+      "zon_overschot_factor": {
+        "name": "Deel zon dat overschot is"
+      },
+      "laadvermogen": {
+        "name": "Laadvermogen (startwaarde)"
+      },
+      "laadrendement": {
+        "name": "Laadrendement"
+      },
+      "vaste_hoeveelheid": {
+        "name": "Vaste hoeveelheid zonder SoC"
+      }
+    },
+    "time": {
+      "deadline": {
+        "name": "Klaar om"
+      }
+    },
+    "switch": {
+      "sturing_actief": {
+        "name": "Sturing actief"
+      }
+    },
+    "sensor": {
+      "resterende_vraag": {
+        "name": "Resterende EV-vraag"
+      },
+      "plan": {
+        "name": "Plan",
+        "state": {
+          "geen": "Niets te doen",
+          "zon": "Zon (Groen)",
+          "zon_aanvullen": "Zon + aanvullen",
+          "kwartieren": "Kwartieren",
+          "direct": "Direct"
+        }
+      },
+      "volgende_start": {
+        "name": "Volgende start"
+      },
+      "kosten_vast_vandaag": {
+        "name": "Kosten vast vandaag"
+      },
+      "kosten_dynamisch_vandaag": {
+        "name": "Kosten dynamisch vandaag"
+      },
+      "kosten_vast_maand": {
+        "name": "Kosten vast deze maand"
+      },
+      "kosten_dynamisch_maand": {
+        "name": "Kosten dynamisch deze maand"
+      },
+      "verschil_dynamisch_maand": {
+        "name": "Besparing dynamisch deze maand"
+      }
+    }
+  }
+}

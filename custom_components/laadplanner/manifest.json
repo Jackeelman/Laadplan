@@ -1,0 +1,15 @@
+{
+  "domain": "laadplanner",
+  "name": "Laadplanner",
+  "codeowners": [
+    "@Jackeelman"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/Jackeelman/Laadplan",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "requirements": [],
+  "version": "0.1.1",
+  "issue_tracker": "https://github.com/Jackeelman/Laadplan/issues"
+}
