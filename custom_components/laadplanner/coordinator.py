@@ -18,6 +18,7 @@ from . import planner as pl
 from .const import (
     CAR_DONE_STATES,
     CONF_CAPACITY,
+    CONF_CAR_REFRESH,
     CONF_CAR_STATUS,
     CONF_CHARGER_MODE,
     CONF_CHARGER_POWER,
@@ -269,11 +270,33 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Only trusted while the charger sees the car plugged in; the car's
         own plug status flickers and is not used.
+
+        The car's data comes from the cloud and can lag hours behind. A
+        "completed" left over from the previous session must not count, or
+        the car would not charge tonight. So it only counts if the car's
+        data was refreshed after the moment it was plugged in. When in
+        doubt (unknown refresh time, just restarted) it does not count:
+        planning a charge for a full car costs nothing, the car just
+        doesn't take it.
         """
         state = self._state(CONF_CAR_STATUS)
         if state is None or state.state in _BAD:
             return False
-        return str(state.state).lower() in CAR_DONE_STATES
+        if str(state.state).lower() not in CAR_DONE_STATES:
+            return False
+        plug = self._state(CONF_PLUG)
+        if plug is None or not self._plugged():
+            return False
+        plugged_since = plug.last_changed
+        if self.conf(CONF_CAR_REFRESH):
+            refresh = self._state(CONF_CAR_REFRESH)
+            if refresh is None or refresh.state in _BAD:
+                return False
+            refreshed = dt_util.parse_datetime(str(refresh.state))
+            return refreshed is not None and refreshed > plugged_since
+        # No refresh sensor: the status itself must have changed after
+        # plugging in.
+        return state.last_changed > plugged_since
 
     def _learn_power(self) -> None:
         """Remember what the charger really delivers (it can't change mid-charge).

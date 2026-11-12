@@ -200,6 +200,9 @@ async def test_car_own_limit_stops_planning(hass: HomeAssistant) -> None:
     hass.states.async_set("switch.iq_ev_charger_1219", "on")
     hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_soc", "70")
     hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_elvehcharging", "COMPLETED")
+    # FordPass refreshed after the car was plugged in
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_lastrefresh",
+                          (dt_util.utcnow() + timedelta(seconds=1)).isoformat())
     await entry.runtime_data.async_set("active", True)
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
@@ -254,3 +257,27 @@ async def test_steering_failure_warns_once(hass: HomeAssistant, caplog) -> None:
     warnings = [r for r in caplog.records
                 if r.levelname == "WARNING" and "sturen mislukt" in r.getMessage()]
     assert len(warnings) == 1
+
+
+async def test_stale_completed_from_last_session_is_ignored(hass: HomeAssistant) -> None:
+    # Yesterday's "COMPLETED", FordPass not refreshed since plugging in at 50%
+    entry = await _setup(hass)
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_elvehcharging", "COMPLETED")
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_lastrefresh",
+                          (dt_util.utcnow() - timedelta(hours=5)).isoformat())
+    hass.states.async_set("binary_sensor.iq_ev_charger_1219_ingeplugd", "off")
+    hass.states.async_set("binary_sensor.iq_ev_charger_1219_ingeplugd", "on")
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_soc", "50")
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.laadplanner_plan").state in ("kwartieren", "zon_aanvullen")
+    assert float(hass.states.get("sensor.laadplanner_resterende_vraag").state) > 0
+
+
+async def test_completed_without_refresh_time_is_ignored(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_elvehcharging", "COMPLETED")
+    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_lastrefresh", "unavailable")
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.laadplanner_plan").state != "geen"
