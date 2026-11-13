@@ -24,7 +24,7 @@ def _states(hass: HomeAssistant, soc: str = "40") -> None:
     raw = [{"start": (now + timedelta(minutes=15 * i)).isoformat(),
             "end": (now + timedelta(minutes=15 * (i + 1))).isoformat(),
             "value": 0.12 if i % 7 == 0 else 0.30} for i in range(96)]
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_soc", soc)
+    hass.states.async_set("sensor.fordpass_jouw_vin_soc", soc)
     hass.states.async_set("binary_sensor.iq_ev_charger_1219_ingeplugd", "on")
     hass.states.async_set("sensor.nordpool_kwh_nl_eur_3_10_021", "0.3",
                           {"raw_today": raw, "raw_tomorrow": []})
@@ -133,7 +133,7 @@ async def test_target_reached_stops_manual_charge(hass: HomeAssistant) -> None:
     entry = await _setup(hass)
     off = async_mock_service(hass, "switch", "turn_off")
     hass.states.async_set("switch.iq_ev_charger_1219", "on")
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_soc", "85")
+    hass.states.async_set("sensor.fordpass_jouw_vin_soc", "85")
     await entry.runtime_data.async_set("active", True)
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
@@ -147,7 +147,7 @@ async def test_target_reached_leaves_green_mode_alone(hass: HomeAssistant) -> No
     hass.states.async_set("select.iq_ev_charger_1219_laadmodus", "Groen",
                           {"options": ["Handmatig", "Gepland", "Groen"]})
     hass.states.async_set("switch.iq_ev_charger_1219", "on")
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_soc", "85")
+    hass.states.async_set("sensor.fordpass_jouw_vin_soc", "85")
     await entry.runtime_data.async_set("active", True)
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
@@ -198,10 +198,10 @@ async def test_car_own_limit_stops_planning(hass: HomeAssistant) -> None:
     entry = await _setup(hass)
     off = async_mock_service(hass, "switch", "turn_off")
     hass.states.async_set("switch.iq_ev_charger_1219", "on")
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_soc", "70")
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_elvehcharging", "COMPLETED")
+    hass.states.async_set("sensor.fordpass_jouw_vin_soc", "70")
+    hass.states.async_set("sensor.fordpass_jouw_vin_elvehcharging", "COMPLETED")
     # FordPass refreshed after the car was plugged in
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_lastrefresh",
+    hass.states.async_set("sensor.fordpass_jouw_vin_lastrefresh",
                           (dt_util.utcnow() + timedelta(seconds=1)).isoformat())
     await entry.runtime_data.async_set("active", True)
     await entry.runtime_data.async_refresh()
@@ -213,7 +213,7 @@ async def test_car_own_limit_stops_planning(hass: HomeAssistant) -> None:
 
 async def test_car_charging_status_keeps_planning(hass: HomeAssistant) -> None:
     entry = await _setup(hass)
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_elvehcharging", "IN_PROGRESS")
+    hass.states.async_set("sensor.fordpass_jouw_vin_elvehcharging", "IN_PROGRESS")
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert hass.states.get("sensor.laadplanner_plan").state in ("kwartieren", "zon_aanvullen")
@@ -262,12 +262,12 @@ async def test_steering_failure_warns_once(hass: HomeAssistant, caplog) -> None:
 async def test_stale_completed_from_last_session_is_ignored(hass: HomeAssistant) -> None:
     # Yesterday's "COMPLETED", FordPass not refreshed since plugging in at 50%
     entry = await _setup(hass)
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_elvehcharging", "COMPLETED")
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_lastrefresh",
+    hass.states.async_set("sensor.fordpass_jouw_vin_elvehcharging", "COMPLETED")
+    hass.states.async_set("sensor.fordpass_jouw_vin_lastrefresh",
                           (dt_util.utcnow() - timedelta(hours=5)).isoformat())
     hass.states.async_set("binary_sensor.iq_ev_charger_1219_ingeplugd", "off")
     hass.states.async_set("binary_sensor.iq_ev_charger_1219_ingeplugd", "on")
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_soc", "50")
+    hass.states.async_set("sensor.fordpass_jouw_vin_soc", "50")
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert hass.states.get("sensor.laadplanner_plan").state in ("kwartieren", "zon_aanvullen")
@@ -276,8 +276,8 @@ async def test_stale_completed_from_last_session_is_ignored(hass: HomeAssistant)
 
 async def test_completed_without_refresh_time_is_ignored(hass: HomeAssistant) -> None:
     entry = await _setup(hass)
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_elvehcharging", "COMPLETED")
-    hass.states.async_set("sensor.fordpass_wf0rpbef9tsk88764_lastrefresh", "unavailable")
+    hass.states.async_set("sensor.fordpass_jouw_vin_elvehcharging", "COMPLETED")
+    hass.states.async_set("sensor.fordpass_jouw_vin_lastrefresh", "unavailable")
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert hass.states.get("sensor.laadplanner_plan").state != "geen"

@@ -36,7 +36,7 @@ OPTIONAL_ENTITIES = (
 )
 
 DEFAULTS = {
-    CONF_SOC: "sensor.fordpass_wf0rpbef9tsk88764_soc",
+    CONF_SOC: "sensor.fordpass_jouw_vin_soc",
     CONF_PLUG: "binary_sensor.iq_ev_charger_1219_ingeplugd",
     CONF_PRICE: "sensor.nordpool_kwh_nl_eur_3_10_021",
     CONF_SOLAR_TODAY: "sensor.energy_production_today_remaining_2",
@@ -46,8 +46,8 @@ DEFAULTS = {
     CONF_CHARGER_MODE: "select.iq_ev_charger_1219_laadmodus",
     CONF_CHARGER_SWITCH: "switch.iq_ev_charger_1219",
     CONF_CHARGER_POWER: "sensor.iq_ev_charger_1219_vermogen",
-    CONF_CAR_STATUS: "sensor.fordpass_wf0rpbef9tsk88764_elvehcharging",
-    CONF_CAR_REFRESH: "sensor.fordpass_wf0rpbef9tsk88764_lastrefresh",
+    CONF_CAR_STATUS: "sensor.fordpass_jouw_vin_elvehcharging",
+    CONF_CAR_REFRESH: "sensor.fordpass_jouw_vin_lastrefresh",
     CONF_CAPACITY: 77.0,
     CONF_GREEN_OPTION: "Groen",
     CONF_MANUAL_OPTION: "Handmatig",

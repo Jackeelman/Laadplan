@@ -20,19 +20,19 @@ Eigen EV-module voor Home Assistant, naast Omnibattery. Plant wanneer de auto la
 
 **Via HACS:** voeg `https://github.com/Jackeelman/Laadplan` in HACS toe als *Custom repository* (type Integratie) en installeer *Laadplanner*.
 
-Daarna: **Instellingen → Apparaten en diensten → Integratie toevoegen → Laadplanner**. De velden zijn al ingevuld met jouw entiteiten:
+Daarna: **Instellingen → Apparaten en diensten → Integratie toevoegen → Laadplanner**. De velden zijn vooraf ingevuld; vervang `jouw_vin` door het VIN in de naam van je eigen FordPass-sensoren:
 
 | Veld | Standaard |
 | --- | --- |
-| Laadtoestand auto | `sensor.fordpass_wf0rpbef9tsk88764_soc` |
+| Laadtoestand auto | `sensor.fordpass_jouw_vin_soc` |
 | Auto aangesloten | `binary_sensor.iq_ev_charger_1219_ingeplugd` |
 | Prijssensor | `sensor.nordpool_kwh_nl_eur_3_10_021` (later Zonneplan ONE) |
 | Zon resterend vandaag / morgen | `sensor.energy_production_today_remaining_2` / `sensor.energy_production_tomorrow_2` |
 | P1 import / export | `sensor.meterkast_p1_meter_hw_energie_import` / `_export` |
 | Laadmodus / aan-uit | `select.iq_ev_charger_1219_laadmodus` / `switch.iq_ev_charger_1219` |
 | Laadvermogen (optioneel) | `sensor.iq_ev_charger_1219_vermogen` |
-| Laadstatus auto (optioneel) | `sensor.fordpass_wf0rpbef9tsk88764_elvehcharging` |
-| Auto laatst vernieuwd (optioneel) | `sensor.fordpass_wf0rpbef9tsk88764_lastrefresh` |
+| Laadstatus auto (optioneel) | `sensor.fordpass_jouw_vin_elvehcharging` |
+| Auto laatst vernieuwd (optioneel) | `sensor.fordpass_jouw_vin_lastrefresh` |
 
 ## Na installatie instellen
 
