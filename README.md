@@ -80,14 +80,15 @@ De module houdt de Home Assistant-database en het log klein:
 
 ## Overstappen naar sturen (fase 3)
 
-Eerst de EV-sturing in SlimLaden op Homey uitzetten (bij Jack: de geavanceerde Homey-flow "Laadpaal SlimLaden" uitschakelen), dan pas `switch.laadplanner_sturing_actief` aan. Nooit twee systemen tegelijk aan de laadpaal of de accu's.
+Eerst de EV-sturing in SlimLaden op Homey uitzetten (bijvoorbeeld de Homey-flow die de laadpaal stuurt uitschakelen), dan pas `switch.laadplanner_sturing_actief` aan. Nooit twee systemen tegelijk aan de laadpaal of de accu's.
 
 ## Aan- en uitzetten van de laadpaal
 
 De Enphase-cloud meldt de stand van de laadpaal minuten te laat (getest 15-11-2026: laden begon 38 s na het startsein, de schakelaar in HA stond pas 4 minuten later op aan). Daarom:
 
 - Na een startsein wacht de module tot 5 minuten op bevestiging voordat hij opnieuw "aan" stuurt.
-- Moet het laden stoppen, dan stuurt hij "uit" zodra iets wijst op laden: de schakelaar, het laadvermogen, de laadstatus van de auto of zijn eigen laatste startsein. Dat herhaalt hij elke 2 minuten (hooguit 5 keer) zolang het laden nog zichtbaar is.
+- Moet het laden stoppen, dan stuurt hij "uit" zodra iets wijst op laden: de schakelaar, het laadvermogen, de laadstatus van de auto of zijn eigen laatste startsein. Dat herhaalt hij elke 2 minuten (hooguit 5 keer) zolang het laden nog zichtbaar is. De laadstatus van de auto telt alleen als FordPass ná het laatste stuursignaal ververst is; een oude "bezig met laden" wordt genegeerd.
+- Laadt de paal na 5 keer "uit" nog steeds, dan stopt hij met sturen en zet hij één waarschuwing in het log.
 - Stoppen wordt niet tegengehouden door de wachttijd van 2 minuten tussen schakelen; starten wel.
 - Elk stuurcommando staat op info-niveau in het log ("Laadplanner: laadpaal aan/uit").
 - Het deel dat de auto van het ingestelde vermogen opneemt, leert hij alleen als de paal op Handmatig staat (Groen kan op één fase laden).
