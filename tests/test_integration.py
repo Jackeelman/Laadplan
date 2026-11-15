@@ -409,8 +409,10 @@ async def test_stop_repeated_while_car_still_charges(hass: HomeAssistant, freeze
     assert hass.states.get("sensor.laadplanner_plan").attributes["nu_laden"] is False
     assert len(off) == 1
     hass.states.async_set("switch.iq_ev_charger_1219", "off")  # cloud says off ...
-    hass.states.async_set("sensor.fordpass_jouw_vin_elvehcharging", "IN_PROGRESS")  # ... car disagrees
     freezer.tick(timedelta(minutes=1))
+    hass.states.async_set("sensor.fordpass_jouw_vin_elvehcharging", "IN_PROGRESS")  # ... car disagrees
+    hass.states.async_set("sensor.fordpass_jouw_vin_lastrefresh",  # with data from after the stop
+                          dt_util.utcnow().isoformat())
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     assert len(off) == 1  # not every minute
@@ -445,3 +447,37 @@ async def test_no_learning_in_green_mode(hass: HomeAssistant, freezer) -> None:
                           {"unit_of_measurement": "W"})
     await entry.runtime_data.async_refresh()
     assert entry.runtime_data.charge_factor is None
+
+
+async def test_stale_car_charging_status_sends_no_extra_stops(hass: HomeAssistant, freezer) -> None:
+    """An old 'in progress' from before the stop must not use up the retries."""
+    entry = await _setup(hass)
+    hass.states.async_set("sensor.fordpass_jouw_vin_elvehcharging", "IN_PROGRESS")
+    hass.states.async_set("sensor.fordpass_jouw_vin_lastrefresh",
+                          (dt_util.utcnow() - timedelta(hours=3)).isoformat())
+    off = async_mock_service(hass, "switch", "turn_off")
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")
+    coordinator = await _active(hass, entry, "kwartieren")
+    assert len(off) == 1
+    hass.states.async_set("switch.iq_ev_charger_1219", "off")
+    for _ in range(10):
+        freezer.tick(timedelta(minutes=2, seconds=1))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert len(off) == 1
+
+
+async def test_warns_once_when_charger_keeps_charging(hass: HomeAssistant, freezer, caplog) -> None:
+    entry = await _setup(hass)
+    off = async_mock_service(hass, "switch", "turn_off")
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")  # stays on: charger ignores us
+    coordinator = await _active(hass, entry, "kwartieren")
+    caplog.clear()
+    for _ in range(12):
+        freezer.tick(timedelta(minutes=2, seconds=1))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert len(off) == 5
+    warnings = [r for r in caplog.records
+                if r.levelname == "WARNING" and "nog te laden" in r.getMessage()]
+    assert len(warnings) == 1

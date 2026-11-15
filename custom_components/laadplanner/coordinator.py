@@ -168,6 +168,8 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._commanded: bool | None = None
         self._commanded_at: datetime | None = None
         self._off_sends = 0
+        self._stop_warned = False
+        self._stop_started_at: datetime | None = None
         self._last_power_update: datetime | None = None
         self._save_scheduled = False
         self._sim_shown: dict[str, Any] = {}
@@ -324,16 +326,23 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         plug = self._state(CONF_PLUG)
         if plug is None or not self._plugged():
             return False
-        plugged_since = plug.last_changed
+        return self._car_data_newer_than(plug.last_changed, state)
+
+    def _car_data_newer_than(self, moment: datetime, status: State) -> bool:
+        """True if the car's cloud data was refreshed after ``moment``.
+
+        FordPass can lag hours behind, so its status only says something
+        about the present when it was refreshed after the event that
+        matters (plugging in, our last command). When in doubt: False.
+        """
         if self.conf(CONF_CAR_REFRESH):
             refresh = self._state(CONF_CAR_REFRESH)
             if refresh is None or refresh.state in _BAD:
                 return False
             refreshed = dt_util.parse_datetime(str(refresh.state))
-            return refreshed is not None and refreshed > plugged_since
-        # No refresh sensor: the status itself must have changed after
-        # plugging in.
-        return state.last_changed > plugged_since
+            return refreshed is not None and refreshed > moment
+        # No refresh sensor: the status itself must have changed after it.
+        return status.last_changed > moment
 
     def _read_charger_setting(self, now: datetime) -> None:
         """Read the charging current set on the charger, and its phases.
@@ -557,10 +566,22 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return (value if unit == "kw" else value / 1000) >= 1.0
 
     def _car_says_charging(self) -> bool:
+        """True if the car reports charging, with data newer than the start
+        of the current stop (or our last command, or the plug-in): an old
+        "in progress" from before the stop must not trigger more stops."""
         state = self._state(CONF_CAR_STATUS)
         if state is None or state.state in _BAD:
             return False
-        return str(state.state).lower() in CAR_CHARGING_STATES
+        if str(state.state).lower() not in CAR_CHARGING_STATES:
+            return False
+        moment = (self._stop_started_at if self._commanded is False
+                  else self._commanded_at)
+        if moment is None:
+            plug = self._state(CONF_PLUG)
+            if plug is None:
+                return False
+            moment = plug.last_changed
+        return self._car_data_newer_than(moment, state)
 
     async def _set_charging(self, on: bool, now: datetime) -> None:
         """Switch the charger, robust against the slow Enphase cloud.
@@ -597,6 +618,13 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if self._commanded is False:
             if self._off_sends >= STOP_MAX_RESENDS:
+                if not self._stop_warned:
+                    self._stop_warned = True
+                    _LOGGER.warning(
+                        "Laadplanner: laadpaal lijkt na %s keer 'uit' nog te laden; "
+                        "ik stuur niet meer. Controleer de laadpaal.",
+                        STOP_MAX_RESENDS,
+                    )
                 return
             if since is not None and since < STOP_RESEND_S:
                 return
@@ -615,3 +643,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._commanded = on
         self._commanded_at = now
         self._off_sends = attempt
+        if on or attempt == 1:
+            self._stop_warned = False
+        if attempt == 1:
+            self._stop_started_at = now
