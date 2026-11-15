@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -168,6 +169,11 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._commanded: bool | None = None
         self._commanded_at: datetime | None = None
         self._off_sends = 0
+        # Whether the cloud already reported the charger on when we last sent
+        # "off". The Enphase cloud ignores a stop for a session it does not
+        # know about yet, so a stop sent too early has to be sent again as
+        # soon as the cloud catches up.
+        self._off_sent_seen_on = True
         self._stop_warned = False
         self._stop_started_at: datetime | None = None
         self._last_power_update: datetime | None = None
@@ -609,7 +615,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return  # started recently; the cloud just hasn't caught up
             if self._last_switch and (now - self._last_switch).total_seconds() < MIN_SWITCH_INTERVAL_S:
                 return
-            await self._send(entity_id, True, now)
+            await self._send(entity_id, True, now, reported_on)
             return
 
         busy = (reported_on or self._power_shows_charging()
@@ -617,6 +623,13 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not busy:
             return
         if self._commanded is False:
+            if reported_on and not self._off_sent_seen_on:
+                # Our stop went out before the cloud knew about the session
+                # and was ignored; now it does know: stop again right away.
+                _LOGGER.info("Laadplanner: cloud meldt de paal nu pas aan; 'uit' opnieuw")
+                self._off_sends = 0
+                await self._send(entity_id, False, now, reported_on)
+                return
             if self._off_sends >= STOP_MAX_RESENDS:
                 if not self._stop_warned:
                     self._stop_warned = True
@@ -628,9 +641,10 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return
             if since is not None and since < STOP_RESEND_S:
                 return
-        await self._send(entity_id, False, now)
+        await self._send(entity_id, False, now, reported_on)
 
-    async def _send(self, entity_id: str, on: bool, now: datetime) -> None:
+    async def _send(self, entity_id: str, on: bool, now: datetime,
+                    reported_on: bool = True) -> None:
         attempt = 0 if on else (self._off_sends + 1 if self._commanded is False else 1)
         self._last_switch = now
         _LOGGER.info("Laadplanner: laadpaal %s%s", "aan" if on else "uit",
@@ -647,3 +661,20 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._stop_warned = False
         if attempt == 1:
             self._stop_started_at = now
+        if not on:
+            self._off_sent_seen_on = reported_on
+        await self._ask_fast_updates(entity_id)
+
+    async def _ask_fast_updates(self, entity_id: str) -> None:
+        """Ask the Enphase integration for faster cloud updates for a while,
+        so the charger's real state shows up sooner after a command."""
+        entry = er.async_get(self.hass).async_get(entity_id)
+        platform = entry.platform if entry else None
+        if not platform or not self.hass.services.has_service(platform, "start_live_stream"):
+            return
+        try:
+            await self.hass.services.async_call(
+                platform, "start_live_stream", {"entity_id": entity_id}, blocking=False,
+            )
+        except Exception as err:  # noqa: BLE001 - best effort only
+            _LOGGER.debug("Laadplanner: live stream aanvragen mislukt: %s", err)
