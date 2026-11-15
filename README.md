@@ -7,7 +7,7 @@ Eigen EV-module voor Home Assistant, naast Omnibattery. Plant wanneer de auto la
 ## Wat hij wel en niet doet
 
 - Zet alleen de **laadmodus** (`Groen` / `Handmatig`) en **aan/uit** van de IQ-lader, en alleen als de sturing aan staat.
-- Verandert **nooit de laadstroom**: dat kan niet tijdens het laden. Hij rekent met het vermogen dat de paal in eerdere sessies haalde.
+- Verandert **nooit de laadstroom**: dat kan niet tijdens het laden. Wel **rekent hij met de ingestelde laadstroom**: stroom × fasen × 230 V (16 A drie fasen = 11,04 kW), maal het deel dat de auto daar in eerdere laadbeurten echt van afnam (geleerd, start op 90%). Zet je de paal op een andere stroom, dan past het plan zich aan. Wisselingen korter dan 2 minuten negeert hij.
 - De fasekeuze (1/3) laat hij aan de paal.
 - Schakelt de paal hooguit eens per 2 minuten.
 - **Laadgrens van de auto:** meldt de auto `COMPLETED` terwijl hij aangesloten is, dan geldt hij als vol, ook als de doel-SoC hoger staat of de SoC-sensor nog achterloopt. De resterende vraag gaat dan naar 0. Zet de laadgrens in de auto dus gelijk aan of hoger dan de doel-SoC als je tot het doel wilt laden. Een `COMPLETED` telt alleen als FordPass **na het aansluiten** ververst is; een oude melding van de vorige laadbeurt wordt genegeerd. Bij twijfel (bijv. net na een herstart van HA) plant hij gewoon laden.
@@ -31,6 +31,8 @@ Daarna: **Instellingen → Apparaten en diensten → Integratie toevoegen → La
 | P1 import / export | `sensor.meterkast_p1_meter_hw_energie_import` / `_export` |
 | Laadmodus / aan-uit | `select.iq_ev_charger_1219_laadmodus` / `switch.iq_ev_charger_1219` |
 | Laadvermogen (optioneel) | `sensor.iq_ev_charger_1219_vermogen` |
+| Ingestelde laadstroom (optioneel) | `number.iq_ev_charger_1219_laadampere` |
+| Fasen laadpaal (optioneel) | `sensor.iq_ev_charger_1219_elektrische_fase` |
 | Laadstatus auto (optioneel) | `sensor.fordpass_jouw_vin_elvehcharging` |
 | Auto laatst vernieuwd (optioneel) | `sensor.fordpass_jouw_vin_lastrefresh` |
 
@@ -84,7 +86,8 @@ Eerst de EV-sturing in SlimLaden op Homey uitzetten, dan pas `switch.laadplanner
 
 - De zonvoorspelling geeft alleen dagtotalen. Het deel van morgen vóór de deadline wordt lineair geschat over 08:00–17:00.
 - Bij een vast contract met één tarief kiest hij nachtkwartieren vanaf `Laden vanaf` (standaard 00:00) tot de deadline. Is die nacht te kort, dan vult hij aan met de avondkwartieren direct ervoor.
-- `Laadvermogen (startwaarde)` wordt alleen gebruikt tot de module zelf het echte vermogen van de paal heeft geleerd.
+- `Laadvermogen (startwaarde)` wordt alleen gebruikt als de ingestelde laadstroom niet bekend is, en dan alleen tot de module zelf het echte vermogen van de paal heeft geleerd.
+- De attributen `laadstroom_a`, `fasen` en `laadvermogen_kw` van `sensor.laadplanner_plan` laten zien waarmee gerekend wordt.
 
 ## Tests
 

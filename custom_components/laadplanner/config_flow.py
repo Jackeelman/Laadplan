@@ -14,7 +14,9 @@ from .const import (
     CONF_CAPACITY,
     CONF_CAR_REFRESH,
     CONF_CAR_STATUS,
+    CONF_CHARGER_CURRENT,
     CONF_CHARGER_MODE,
+    CONF_CHARGER_PHASES,
     CONF_CHARGER_POWER,
     CONF_CHARGER_SWITCH,
     CONF_EXPORT,
@@ -42,6 +44,8 @@ _ENTITY_FIELDS = {
     CONF_CHARGER_MODE: ["select"],
     CONF_CHARGER_SWITCH: ["switch"],
     CONF_CHARGER_POWER: ["sensor"],
+    CONF_CHARGER_CURRENT: ["number", "input_number", "sensor"],
+    CONF_CHARGER_PHASES: ["sensor", "select"],
     CONF_CAR_STATUS: ["sensor", "binary_sensor"],
     CONF_CAR_REFRESH: ["sensor"],
 }
