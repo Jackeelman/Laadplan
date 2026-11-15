@@ -109,6 +109,8 @@ class PlannerSensor(LaadplannerEntity, SensorEntity):
             "zon_voor_deadline_kwh",
             "deadline",
             "laadvermogen_kw",
+            "laadstroom_a",
+            "fasen",
             "bekende_prijzen",
             "sturing_actief",
             "kwh_zonder_prijs",
@@ -148,6 +150,8 @@ class PlannerSensor(LaadplannerEntity, SensorEntity):
                 "zon_voor_deadline_kwh": round(data["solar_before_deadline"], 1),
                 "deadline": data["deadline"].isoformat(),
                 "laadvermogen_kw": round(data["power_kw"], 1),
+                "laadstroom_a": data["charger_amps"],
+                "fasen": data["charger_phases"],
                 "bekende_prijzen": data["prices_known"],
                 "sturing_actief": bool(self.coordinator.settings.get("active")),
             }

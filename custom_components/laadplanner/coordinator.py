@@ -16,11 +16,18 @@ from homeassistant.util import dt as dt_util
 
 from . import planner as pl
 from .const import (
+    CURRENT_SETTLE_S,
+    DEFAULT_CHARGE_FACTOR,
+    LEARN_SETTLE_S,
+    VIN_PLACEHOLDER,
+    VOLTAGE,
     CAR_DONE_STATES,
     CONF_CAPACITY,
     CONF_CAR_REFRESH,
     CONF_CAR_STATUS,
+    CONF_CHARGER_CURRENT,
     CONF_CHARGER_MODE,
+    CONF_CHARGER_PHASES,
     CONF_CHARGER_POWER,
     CONF_CHARGER_SWITCH,
     CONF_EXPORT,
@@ -145,6 +152,11 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.settings: dict[str, Any] = dict(SETTING_DEFAULTS)
         self.sim: dict[str, Any] = {}
         self.measured_power_kw: float | None = None
+        # Set charging current (A), phases and the learned share of that
+        # power the car really takes (0..1).
+        self.charger_amps: float | None = None
+        self.charger_phases: int | None = None
+        self.charge_factor: float | None = None
         self._last_switch: datetime | None = None
         self._last_power_update: datetime | None = None
         self._save_scheduled = False
@@ -157,7 +169,17 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def conf(self, key: str) -> Any:
         merged = {**DEFAULTS, **self.entry.data, **self.entry.options}
-        return merged.get(key)
+        value = merged.get(key)
+        if isinstance(value, str) and VIN_PLACEHOLDER in value:
+            # A FordPass default that was never filled in (fields added in a
+            # later version): take the car id from the configured SoC sensor,
+            # e.g. sensor.fordpass_<id>_soc.
+            soc = str(merged.get(CONF_SOC) or "")
+            if (soc.startswith("sensor.fordpass_") and soc.endswith("_soc")
+                    and VIN_PLACEHOLDER not in soc):
+                car = soc[len("sensor.fordpass_"):-len("_soc")]
+                value = value.replace(VIN_PLACEHOLDER, car)
+        return value
 
     def _state(self, key: str) -> State | None:
         entity_id = self.conf(key)
@@ -170,6 +192,8 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.settings.update(stored.get("settings", {}))
         self.sim = stored.get("sim", {})
         self.measured_power_kw = stored.get("measured_power_kw")
+        self.charge_factor = stored.get("charge_factor")
+        self.charger_phases = stored.get("charger_phases")
 
     async def async_save(self) -> None:
         # A direct save also cancels a pending delayed save.
@@ -204,7 +228,8 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         now = dt_util.now()
         prices = parse_prices(self._state(CONF_PRICE))
-        self._learn_power()
+        self._read_charger_setting(now)
+        self._learn_power(now)
         plan_input = self._build_input(now, prices)
         plan = pl.make_plan(plan_input)
         self.plan = plan
@@ -240,6 +265,8 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "next_start": nxt,
             "charge_now": plan.charge_now(now),
             "power_kw": plan_input.charge_power_kw,
+            "charger_amps": self.charger_amps,
+            "charger_phases": self.charger_phases,
             "solar_before_deadline": plan_input.solar_before_deadline_kwh,
             "prices_known": len(prices),
             "sim": self._sim_shown,
@@ -298,12 +325,65 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # plugging in.
         return state.last_changed > plugged_since
 
-    def _learn_power(self) -> None:
-        """Remember what the charger really delivers (it can't change mid-charge).
+    def _read_charger_setting(self, now: datetime) -> None:
+        """Read the charging current set on the charger, and its phases.
+
+        Short changes (a few seconds at 6 A, as seen in practice) are
+        ignored: a new current only counts once it has held for 2 minutes.
+        """
+        state = self._state(CONF_CHARGER_CURRENT)
+        amps = _float(state)
+        if state is not None and amps is not None and amps > 0:
+            steady = (now - state.last_changed).total_seconds() >= CURRENT_SETTLE_S
+            if steady or self.charger_amps is None:
+                self.charger_amps = amps
+        phases = self._phases()
+        if phases:
+            self.charger_phases = phases
+
+    def _phases(self) -> int | None:
+        state = self._state(CONF_CHARGER_PHASES)
+        if state is None:
+            return None
+        raw = state.attributes.get("phase_mode_raw")
+        if raw in (1, 3):
+            return int(raw)
+        text = str(state.state).lower()
+        if any(w in text for w in ("three", "drie", "3")):
+            return 3
+        if any(w in text for w in ("single", "één", "een", "one", "1")):
+            return 1
+        return None  # unknown (e.g. right after a restart): keep the last one
+
+    def _set_power_kw(self) -> float | None:
+        """Power the set current allows: amps x 230 V x phases."""
+        if not self.charger_amps:
+            return None
+        return self.charger_amps * VOLTAGE * (self.charger_phases or 3) / 1000
+
+    def _charge_power_kw(self) -> float:
+        """Power to plan with.
+
+        With the charger's current known: the power that current allows,
+        times the share the car has been seen to take. Otherwise the
+        learned average, or the configured starting value.
+        """
+        set_kw = self._set_power_kw()
+        if set_kw:
+            factor = self.charge_factor
+            if factor is None and self.measured_power_kw:
+                # first run after updating: start from what was learned
+                factor = min(1.0, self.measured_power_kw / set_kw)
+            return set_kw * (factor if factor is not None else DEFAULT_CHARGE_FACTOR)
+        return self.measured_power_kw or float(self.settings[SET_POWER])
+
+    def _learn_power(self, now: datetime) -> None:
+        """Remember what the charger really delivers.
 
         The Enphase charger power comes from the cloud and updates slowly, so
         only learn from a value that actually changed; it is a session
-        average, not a control signal.
+        average, not a control signal. With the set current known, learn the
+        share of that power the car takes, only at a steady current.
         """
         state = self._state(CONF_CHARGER_POWER)
         value = _float(state)
@@ -321,6 +401,18 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self.measured_power_kw = 0.9 * self.measured_power_kw + 0.1 * kw
 
+        set_kw = self._set_power_kw()
+        amps_state = self._state(CONF_CHARGER_CURRENT)
+        if not set_kw or amps_state is None:
+            return
+        if (now - amps_state.last_changed).total_seconds() < LEARN_SETTLE_S:
+            return  # the measurement window may still hold the old current
+        ratio = max(0.3, min(1.0, kw / set_kw))
+        if self.charge_factor is None:
+            self.charge_factor = ratio
+        else:
+            self.charge_factor = 0.9 * self.charge_factor + 0.1 * ratio
+
     def _build_input(self, now: datetime, prices: list[pl.PriceSlot]) -> pl.PlanInput:
         deadline = pl.next_deadline(now, self._deadline_time())
         solar = pl.solar_share_before(
@@ -329,7 +421,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _float(self._state(CONF_SOLAR_TODAY)) or 0.0,
             _float(self._state(CONF_SOLAR_TOMORROW)) or 0.0,
         )
-        power = self.measured_power_kw or float(self.settings[SET_POWER])
+        power = self._charge_power_kw()
         return pl.PlanInput(
             now=now,
             soc_pct=_float(self._state(CONF_SOC)),
@@ -395,6 +487,8 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "settings": self.settings,
             "sim": self.sim,
             "measured_power_kw": self.measured_power_kw,
+            "charge_factor": self.charge_factor,
+            "charger_phases": self.charger_phases,
         }
 
     # -- steering (only when the active switch is on) -------------------------

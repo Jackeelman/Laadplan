@@ -281,3 +281,81 @@ async def test_completed_without_refresh_time_is_ignored(hass: HomeAssistant) ->
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert hass.states.get("sensor.laadplanner_plan").state != "geen"
+
+
+def _current(hass: HomeAssistant, amps: str, phases: str = "Three Phase") -> None:
+    hass.states.async_set("number.iq_ev_charger_1219_laadampere", amps,
+                          {"unit_of_measurement": "A"})
+    hass.states.async_set("sensor.iq_ev_charger_1219_elektrische_fase", phases)
+
+
+async def test_plan_uses_set_current(hass: HomeAssistant, freezer) -> None:
+    _current(hass, "16.0")
+    freezer.tick(timedelta(minutes=5))
+    entry = await _setup(hass)
+    plan = hass.states.get("sensor.laadplanner_plan")
+    # 16 A x 230 V x 3 = 11.04 kW, of which the car takes 90% until learned
+    assert plan.attributes["laadvermogen_kw"] == 9.9
+    assert plan.attributes["laadstroom_a"] == 16.0
+    assert plan.attributes["fasen"] == 3
+
+    _current(hass, "6.0")
+    freezer.tick(timedelta(minutes=3))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    plan6 = hass.states.get("sensor.laadplanner_plan")
+    assert plan6.attributes["laadvermogen_kw"] == 3.7  # 6 x 230 x 3 x 0.9
+    assert plan6.attributes["kwartieren_nodig"] > plan.attributes["kwartieren_nodig"]
+
+
+async def test_brief_current_change_is_ignored(hass: HomeAssistant, freezer) -> None:
+    _current(hass, "16.0")
+    freezer.tick(timedelta(minutes=5))
+    entry = await _setup(hass)
+    _current(hass, "6.0")  # a few seconds at 6 A, as seen in practice
+    freezer.tick(timedelta(seconds=10))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.laadplanner_plan").attributes["laadstroom_a"] == 16.0
+
+
+async def test_single_phase(hass: HomeAssistant, freezer) -> None:
+    _current(hass, "16.0", "Single Phase")
+    freezer.tick(timedelta(minutes=5))
+    await _setup(hass)
+    plan = hass.states.get("sensor.laadplanner_plan")
+    assert plan.attributes["fasen"] == 1
+    assert plan.attributes["laadvermogen_kw"] == 3.3  # 16 x 230 x 0.9
+
+
+async def test_learns_share_the_car_takes(hass: HomeAssistant, freezer) -> None:
+    _current(hass, "16.0")
+    freezer.tick(timedelta(minutes=10))
+    entry = await _setup(hass)
+    coordinator = entry.runtime_data
+    freezer.tick(timedelta(minutes=1))
+    hass.states.async_set("sensor.iq_ev_charger_1219_vermogen", "9936",
+                          {"unit_of_measurement": "W"})
+    await coordinator.async_refresh()
+    assert abs(coordinator.charge_factor - 9.936 / 11.04) < 1e-6
+    # at another current the same share is used
+    _current(hass, "10.0")
+    freezer.tick(timedelta(minutes=3))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    expected = round(10 * 230 * 3 / 1000 * 9.936 / 11.04, 1)
+    assert hass.states.get("sensor.laadplanner_plan").attributes["laadvermogen_kw"] == expected
+
+
+async def test_fordpass_defaults_follow_configured_soc(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, "soc_entity": "sensor.fordpass_abc123_soc"})
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries("laadplanner")[0]
+    data = {k: v for k, v in entry.data.items()
+            if k not in ("car_charge_status_entity", "car_last_refresh_entity")}
+    hass.config_entries.async_update_entry(entry, data=data)
+    coordinator = entry.runtime_data
+    assert coordinator.conf("car_charge_status_entity") == "sensor.fordpass_abc123_elvehcharging"
+    assert coordinator.conf("car_last_refresh_entity") == "sensor.fordpass_abc123_lastrefresh"

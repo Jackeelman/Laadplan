@@ -6,6 +6,11 @@ DOMAIN = "laadplanner"
 STORAGE_VERSION = 1
 UPDATE_SECONDS = 60
 MIN_SWITCH_INTERVAL_S = 120  # never toggle the charger faster than this
+VOLTAGE = 230.0              # grid voltage per phase
+CURRENT_SETTLE_S = 120       # ignore current changes shorter than this
+LEARN_SETTLE_S = 300         # learn the car's share only at a steady current
+DEFAULT_CHARGE_FACTOR = 0.9  # share of the set power the car takes, until learned
+VIN_PLACEHOLDER = "jouw_vin"
 
 # Car charge status values meaning "the car stopped: its own limit is reached"
 CAR_DONE_STATES = {"completed", "complete", "charge_complete", "charging_complete",
@@ -24,6 +29,8 @@ CONF_CHARGER_SWITCH = "charger_switch_entity"
 CONF_CHARGER_POWER = "charger_power_entity"
 CONF_CAR_STATUS = "car_charge_status_entity"
 CONF_CAR_REFRESH = "car_last_refresh_entity"
+CONF_CHARGER_CURRENT = "charger_current_entity"
+CONF_CHARGER_PHASES = "charger_phases_entity"
 CONF_CAPACITY = "capacity_kwh"
 CONF_GREEN_OPTION = "green_option"
 CONF_MANUAL_OPTION = "manual_option"
@@ -33,6 +40,8 @@ OPTIONAL_ENTITIES = (
     "charger_power_entity",
     "car_charge_status_entity",
     "car_last_refresh_entity",
+    "charger_current_entity",
+    "charger_phases_entity",
 )
 
 DEFAULTS = {
@@ -46,6 +55,8 @@ DEFAULTS = {
     CONF_CHARGER_MODE: "select.iq_ev_charger_1219_laadmodus",
     CONF_CHARGER_SWITCH: "switch.iq_ev_charger_1219",
     CONF_CHARGER_POWER: "sensor.iq_ev_charger_1219_vermogen",
+    CONF_CHARGER_CURRENT: "number.iq_ev_charger_1219_laadampere",
+    CONF_CHARGER_PHASES: "sensor.iq_ev_charger_1219_elektrische_fase",
     CONF_CAR_STATUS: "sensor.fordpass_jouw_vin_elvehcharging",
     CONF_CAR_REFRESH: "sensor.fordpass_jouw_vin_lastrefresh",
     CONF_CAPACITY: 77.0,
