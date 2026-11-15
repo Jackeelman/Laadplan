@@ -284,7 +284,7 @@ async def test_completed_without_refresh_time_is_ignored(hass: HomeAssistant) ->
 
 
 def _current(hass: HomeAssistant, amps: str, phases: str = "Three Phase") -> None:
-    hass.states.async_set("number.iq_ev_charger_1219_laadampere", amps,
+    hass.states.async_set("number.auto_iq_ev_charger_1219_standaard_laadniveau", amps,
                           {"unit_of_measurement": "A"})
     hass.states.async_set("sensor.iq_ev_charger_1219_elektrische_fase", phases)
 
@@ -359,3 +359,89 @@ async def test_fordpass_defaults_follow_configured_soc(hass: HomeAssistant) -> N
     coordinator = entry.runtime_data
     assert coordinator.conf("car_charge_status_entity") == "sensor.fordpass_abc123_elvehcharging"
     assert coordinator.conf("car_last_refresh_entity") == "sensor.fordpass_abc123_lastrefresh"
+
+
+async def _active(hass, entry, strategy="direct"):
+    coordinator = entry.runtime_data
+    await coordinator.async_set("strategy", strategy)
+    await coordinator.async_set("active", True)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    return coordinator
+
+
+async def test_start_not_repeated_while_cloud_lags(hass: HomeAssistant, freezer) -> None:
+    """The Enphase switch stays 'off' for minutes after a start (seen 15-11)."""
+    entry = await _setup(hass)
+    on = async_mock_service(hass, "switch", "turn_on")
+    coordinator = await _active(hass, entry)
+    assert len(on) == 1
+    for _ in range(3):  # 3 x 1 min: switch still reported off
+        freezer.tick(timedelta(minutes=1))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert len(on) == 1
+    freezer.tick(timedelta(minutes=3))  # > 5 min and still nothing: try again
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(on) == 2
+
+
+async def test_stop_sent_although_switch_still_reports_off(hass: HomeAssistant, freezer) -> None:
+    """Right after a start the reported switch is still 'off': stop anyway."""
+    entry = await _setup(hass)
+    async_mock_service(hass, "switch", "turn_on")
+    off = async_mock_service(hass, "switch", "turn_off")
+    coordinator = await _active(hass, entry)
+    freezer.tick(timedelta(seconds=30))  # well within the 120 s flap guard
+    await coordinator.async_set("strategy", "kwartieren")
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.laadplanner_plan").attributes["nu_laden"] is False
+    assert len(off) == 1
+
+
+async def test_stop_repeated_while_car_still_charges(hass: HomeAssistant, freezer) -> None:
+    entry = await _setup(hass)
+    off = async_mock_service(hass, "switch", "turn_off")
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")
+    coordinator = await _active(hass, entry, "kwartieren")
+    assert hass.states.get("sensor.laadplanner_plan").attributes["nu_laden"] is False
+    assert len(off) == 1
+    hass.states.async_set("switch.iq_ev_charger_1219", "off")  # cloud says off ...
+    hass.states.async_set("sensor.fordpass_jouw_vin_elvehcharging", "IN_PROGRESS")  # ... car disagrees
+    freezer.tick(timedelta(minutes=1))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(off) == 1  # not every minute
+    for _ in range(20):
+        freezer.tick(timedelta(minutes=2, seconds=1))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert len(off) == 5  # capped
+    # once nothing shows charging any more, nothing is sent
+    hass.states.async_set("sensor.fordpass_jouw_vin_elvehcharging", "NOT_READY")
+    freezer.tick(timedelta(minutes=10))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(off) == 5
+
+
+async def test_quiet_charger_gets_no_stop(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    off = async_mock_service(hass, "switch", "turn_off")
+    await _active(hass, entry, "kwartieren")
+    assert off == []
+
+
+async def test_no_learning_in_green_mode(hass: HomeAssistant, freezer) -> None:
+    _current(hass, "16.0")
+    freezer.tick(timedelta(minutes=10))
+    entry = await _setup(hass)
+    hass.states.async_set("select.iq_ev_charger_1219_laadmodus", "Groen",
+                          {"options": ["Handmatig", "Gepland", "Groen"]})
+    freezer.tick(timedelta(minutes=1))
+    hass.states.async_set("sensor.iq_ev_charger_1219_vermogen", "3600",
+                          {"unit_of_measurement": "W"})
+    await entry.runtime_data.async_refresh()
+    assert entry.runtime_data.charge_factor is None
