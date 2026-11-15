@@ -481,3 +481,36 @@ async def test_warns_once_when_charger_keeps_charging(hass: HomeAssistant, freez
     warnings = [r for r in caplog.records
                 if r.levelname == "WARNING" and "nog te laden" in r.getMessage()]
     assert len(warnings) == 1
+
+
+async def test_stop_resent_when_cloud_catches_up(hass: HomeAssistant, freezer) -> None:
+    """15-11 19:56: 'off' sent while the cloud still said 'off' was ignored.
+    As soon as the cloud reports the charger on, stop again at once."""
+    entry = await _setup(hass)
+    async_mock_service(hass, "switch", "turn_on")
+    off = async_mock_service(hass, "switch", "turn_off")
+    coordinator = await _active(hass, entry)          # start, cloud says off
+    freezer.tick(timedelta(minutes=2))
+    await coordinator.async_set("strategy", "kwartieren")
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(off) == 1                               # sent too early
+    freezer.tick(timedelta(seconds=30))                # within the resend wait
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")  # cloud catches up
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(off) == 2                               # immediately again
+
+
+async def test_live_stream_requested_after_command(hass: HomeAssistant) -> None:
+    from homeassistant.helpers import entity_registry as er
+    reg = er.async_get(hass)
+    made = reg.async_get_or_create("switch", "enphase_ev", "iq1219",
+                                   suggested_object_id="iq_ev_charger_1219")
+    assert made.entity_id == "switch.iq_ev_charger_1219"
+    entry = await _setup(hass)
+    async_mock_service(hass, "switch", "turn_on")
+    live = async_mock_service(hass, "enphase_ev", "start_live_stream")
+    await _active(hass, entry)
+    await hass.async_block_till_done()
+    assert [c.data["entity_id"] for c in live] == ["switch.iq_ev_charger_1219"]

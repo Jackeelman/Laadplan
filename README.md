@@ -90,6 +90,8 @@ De Enphase-cloud meldt de stand van de laadpaal minuten te laat (getest 15-11-20
 - Moet het laden stoppen, dan stuurt hij "uit" zodra iets wijst op laden: de schakelaar, het laadvermogen, de laadstatus van de auto of zijn eigen laatste startsein. Dat herhaalt hij elke 2 minuten (hooguit 5 keer) zolang het laden nog zichtbaar is. De laadstatus van de auto telt alleen als FordPass ná het laatste stuursignaal ververst is; een oude "bezig met laden" wordt genegeerd.
 - Laadt de paal na 5 keer "uit" nog steeds, dan stopt hij met sturen en zet hij één waarschuwing in het log.
 - Stoppen wordt niet tegengehouden door de wachttijd van 2 minuten tussen schakelen; starten wel.
+- De Enphase-cloud negeert een stopcommando voor een laadsessie die hij zelf nog niet kent (getest 15-11-2026: "uit" om 19:56:45 genegeerd, de cloud stond nog op gepauzeerd terwijl de auto op 11,7 kW laadde). Was "uit" verstuurd terwijl de cloud de paal nog niet als aan zag, dan stuurt de module het opnieuw zodra de cloud de paal wél als aan meldt.
+- Na elk stuurcommando vraagt hij de Enphase-integratie (als die `start_live_stream` heeft) om een tijd lang snellere cloudupdates.
 - Elk stuurcommando staat op info-niveau in het log ("Laadplanner: laadpaal aan/uit").
 - Het deel dat de auto van het ingestelde vermogen opneemt, leert hij alleen als de paal op Handmatig staat (Groen kan op één fase laden).
 
