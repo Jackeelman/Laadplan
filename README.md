@@ -31,7 +31,7 @@ Daarna: **Instellingen → Apparaten en diensten → Integratie toevoegen → La
 | P1 import / export | `sensor.meterkast_p1_meter_hw_energie_import` / `_export` |
 | Laadmodus / aan-uit | `select.iq_ev_charger_1219_laadmodus` / `switch.iq_ev_charger_1219` |
 | Laadvermogen (optioneel) | `sensor.iq_ev_charger_1219_vermogen` |
-| Ingestelde laadstroom (optioneel) | `number.iq_ev_charger_1219_laadampere` |
+| Ingestelde laadstroom (optioneel) | `number.auto_iq_ev_charger_1219_standaard_laadniveau` |
 | Fasen laadpaal (optioneel) | `sensor.iq_ev_charger_1219_elektrische_fase` |
 | Laadstatus auto (optioneel) | `sensor.fordpass_jouw_vin_elvehcharging` |
 | Auto laatst vernieuwd (optioneel) | `sensor.fordpass_jouw_vin_lastrefresh` |
@@ -80,7 +80,17 @@ De module houdt de Home Assistant-database en het log klein:
 
 ## Overstappen naar sturen (fase 3)
 
-Eerst de EV-sturing in SlimLaden op Homey uitzetten, dan pas `switch.laadplanner_sturing_actief` aan. Nooit twee systemen tegelijk aan de laadpaal of de accu's.
+Eerst de EV-sturing in SlimLaden op Homey uitzetten (bij Jack: de geavanceerde Homey-flow "Laadpaal SlimLaden" uitschakelen), dan pas `switch.laadplanner_sturing_actief` aan. Nooit twee systemen tegelijk aan de laadpaal of de accu's.
+
+## Aan- en uitzetten van de laadpaal
+
+De Enphase-cloud meldt de stand van de laadpaal minuten te laat (getest 15-11-2026: laden begon 38 s na het startsein, de schakelaar in HA stond pas 4 minuten later op aan). Daarom:
+
+- Na een startsein wacht de module tot 5 minuten op bevestiging voordat hij opnieuw "aan" stuurt.
+- Moet het laden stoppen, dan stuurt hij "uit" zodra iets wijst op laden: de schakelaar, het laadvermogen, de laadstatus van de auto of zijn eigen laatste startsein. Dat herhaalt hij elke 2 minuten (hooguit 5 keer) zolang het laden nog zichtbaar is.
+- Stoppen wordt niet tegengehouden door de wachttijd van 2 minuten tussen schakelen; starten wel.
+- Elk stuurcommando staat op info-niveau in het log ("Laadplanner: laadpaal aan/uit").
+- Het deel dat de auto van het ingestelde vermogen opneemt, leert hij alleen als de paal op Handmatig staat (Groen kan op één fase laden).
 
 ## Bekende beperkingen
 

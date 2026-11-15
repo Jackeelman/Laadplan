@@ -16,6 +16,10 @@ from homeassistant.util import dt as dt_util
 
 from . import planner as pl
 from .const import (
+    CAR_CHARGING_STATES,
+    START_CONFIRM_S,
+    STOP_MAX_RESENDS,
+    STOP_RESEND_S,
     CURRENT_SETTLE_S,
     DEFAULT_CHARGE_FACTOR,
     LEARN_SETTLE_S,
@@ -158,6 +162,12 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.charger_phases: int | None = None
         self.charge_factor: float | None = None
         self._last_switch: datetime | None = None
+        # What the planner itself last told the charger, and when. The
+        # Enphase cloud reports the switch minutes late, so this is trusted
+        # over the reported state.
+        self._commanded: bool | None = None
+        self._commanded_at: datetime | None = None
+        self._off_sends = 0
         self._last_power_update: datetime | None = None
         self._save_scheduled = False
         self._sim_shown: dict[str, Any] = {}
@@ -407,6 +417,8 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if (now - amps_state.last_changed).total_seconds() < LEARN_SETTLE_S:
             return  # the measurement window may still hold the old current
+        if not self._mode_is(self.conf(CONF_MANUAL_OPTION)):
+            return  # green mode may charge on one phase or at a lower current
         ratio = max(0.3, min(1.0, kw / set_kw))
         if self.charge_factor is None:
             self.charge_factor = ratio
@@ -536,18 +548,70 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             blocking=True,
         )
 
+    def _power_shows_charging(self) -> bool:
+        state = self._state(CONF_CHARGER_POWER)
+        value = _float(state)
+        if value is None or state is None:
+            return False
+        unit = str(state.attributes.get("unit_of_measurement", "W")).lower()
+        return (value if unit == "kw" else value / 1000) >= 1.0
+
+    def _car_says_charging(self) -> bool:
+        state = self._state(CONF_CAR_STATUS)
+        if state is None or state.state in _BAD:
+            return False
+        return str(state.state).lower() in CAR_CHARGING_STATES
+
     async def _set_charging(self, on: bool, now: datetime) -> None:
+        """Switch the charger, robust against the slow Enphase cloud.
+
+        The reported switch state can lag minutes behind. A start is not
+        repeated while it may still be on its way; a stop is sent whenever
+        anything suggests the car is charging (reported switch, charger
+        power, car status or our own last command), and repeated a few
+        times until that stops.
+        """
         entity_id = self.conf(CONF_CHARGER_SWITCH)
         state = self.hass.states.get(entity_id) if entity_id else None
         if state is None or state.state in _BAD:
             return
-        if (state.state == STATE_ON) == on:
+        reported_on = state.state == STATE_ON
+        since = ((now - self._commanded_at).total_seconds()
+                 if self._commanded_at else None)
+
+        if on:
+            if reported_on or self._power_shows_charging():
+                self._commanded = True
+                self._off_sends = 0
+                return
+            if self._commanded is True and since is not None and since < START_CONFIRM_S:
+                return  # started recently; the cloud just hasn't caught up
+            if self._last_switch and (now - self._last_switch).total_seconds() < MIN_SWITCH_INTERVAL_S:
+                return
+            await self._send(entity_id, True, now)
             return
-        if self._last_switch and (now - self._last_switch).total_seconds() < MIN_SWITCH_INTERVAL_S:
+
+        busy = (reported_on or self._power_shows_charging()
+                or self._car_says_charging() or self._commanded is True)
+        if not busy:
             return
+        if self._commanded is False:
+            if self._off_sends >= STOP_MAX_RESENDS:
+                return
+            if since is not None and since < STOP_RESEND_S:
+                return
+        await self._send(entity_id, False, now)
+
+    async def _send(self, entity_id: str, on: bool, now: datetime) -> None:
+        attempt = 0 if on else (self._off_sends + 1 if self._commanded is False else 1)
         self._last_switch = now
-        _LOGGER.info("Laadplanner: laadpaal %s", "aan" if on else "uit")
+        _LOGGER.info("Laadplanner: laadpaal %s%s", "aan" if on else "uit",
+                     f" (poging {attempt})" if attempt > 1 else "")
         await self.hass.services.async_call(
             "switch", "turn_on" if on else "turn_off", {"entity_id": entity_id},
             blocking=True,
         )
+        # Only remember the command once it was accepted.
+        self._commanded = on
+        self._commanded_at = now
+        self._off_sends = attempt
