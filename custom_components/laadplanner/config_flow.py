@@ -11,12 +11,16 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_BATTERY_POWER,
     CONF_CAPACITY,
+    CONF_CAR_PAUSE,
     CONF_CAR_REFRESH,
+    CONF_CAR_START,
     CONF_CAR_STATUS,
     CONF_CHARGER_CURRENT,
     CONF_CHARGER_MODE,
     CONF_CHARGER_PHASES,
+    CONF_CHARGER_SAFE,
     CONF_CHARGER_POWER,
     CONF_CHARGER_SWITCH,
     CONF_EXPORT,
@@ -46,8 +50,12 @@ _ENTITY_FIELDS = {
     CONF_CHARGER_POWER: ["sensor"],
     CONF_CHARGER_CURRENT: ["number", "input_number", "sensor"],
     CONF_CHARGER_PHASES: ["sensor", "select"],
+    CONF_CHARGER_SAFE: ["sensor"],
     CONF_CAR_STATUS: ["sensor", "binary_sensor"],
     CONF_CAR_REFRESH: ["sensor"],
+    CONF_CAR_PAUSE: ["button"],
+    CONF_CAR_START: ["button"],
+    CONF_BATTERY_POWER: ["sensor"],
 }
 
 

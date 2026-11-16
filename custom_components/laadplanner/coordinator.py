@@ -17,6 +17,13 @@ from homeassistant.util import dt as dt_util
 
 from . import planner as pl
 from .const import (
+    CAR_FINAL_RESTART_S,
+    CAR_PAUSE_AFTER_S,
+    CAR_PAUSE_MAX_PRESSES,
+    CAR_PAUSE_REPEAT_S,
+    CAR_START_RETRY_S,
+    CAR_START_SLOW_RETRY_S,
+    CAR_START_WARN_AFTER,
     CAR_CHARGING_STATES,
     START_CONFIRM_S,
     STOP_MAX_RESENDS,
@@ -27,12 +34,16 @@ from .const import (
     VIN_PLACEHOLDER,
     VOLTAGE,
     CAR_DONE_STATES,
+    CONF_BATTERY_POWER,
     CONF_CAPACITY,
+    CONF_CAR_PAUSE,
     CONF_CAR_REFRESH,
+    CONF_CAR_START,
     CONF_CAR_STATUS,
     CONF_CHARGER_CURRENT,
     CONF_CHARGER_MODE,
     CONF_CHARGER_PHASES,
+    CONF_CHARGER_SAFE,
     CONF_CHARGER_POWER,
     CONF_CHARGER_SWITCH,
     CONF_EXPORT,
@@ -176,12 +187,32 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._off_sent_seen_on = True
         self._stop_warned = False
         self._stop_started_at: datetime | None = None
+        # Current setting candidate, so short jumps can be ignored.
+        self._amps_candidate: float | None = None
+        self._amps_candidate_since: datetime | None = None
+        # Grid import power from the P1 meter (kW), and its value at the
+        # moment of the last stop: the one signal that does not depend on
+        # the Enphase or Ford cloud.
+        self.import_kw: float | None = None
+        self.load_kw: float | None = None
+        self._import_sample: tuple[datetime, float, float | None] | None = None
+        self._import_kw_at_stop: float | None = None
+        self._load_kw_at_stop: float | None = None
+        # FordPass fallback: the car paused by us must always be restarted.
+        self.car_paused_by_us = False
+        self._car_paused_at: datetime | None = None
+        self._pause_presses = 0
+        self._last_pause_press: datetime | None = None
+        self._last_start_press: datetime | None = None
+        self._start_presses = 0
+        self._start_warned = False
         self._last_power_update: datetime | None = None
         self._save_scheduled = False
         self._sim_shown: dict[str, Any] = {}
         self._sim_shown_quarter: datetime | None = None
         self._steer_failing = False
         self.plan: pl.Plan | None = None
+        self.data_deadline: datetime | None = None
 
     # -- config helpers -----------------------------------------------------
 
@@ -212,6 +243,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.measured_power_kw = stored.get("measured_power_kw")
         self.charge_factor = stored.get("charge_factor")
         self.charger_phases = stored.get("charger_phases")
+        self.car_paused_by_us = bool(stored.get("car_paused_by_us", False))
 
     async def async_save(self) -> None:
         # A direct save also cancels a pending delayed save.
@@ -238,6 +270,10 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Change a setting from one of the integration's entities."""
         self.settings[key] = value
         self._sim_shown_quarter = None  # show new tariffs' effect right away
+        if key == SET_ACTIVE and not value and self.car_paused_by_us:
+            # Steering off: never leave the car paused by us behind.
+            await self._press_car_start(dt_util.now(), force=True)
+            self._clear_car_pause("sturing uitgezet")
         await self.async_save()
         await self.async_request_refresh()
 
@@ -251,6 +287,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         plan_input = self._build_input(now, prices)
         plan = pl.make_plan(plan_input)
         self.plan = plan
+        self.data_deadline = plan_input.deadline
         sim = self._simulate(now, prices)
         # The cost sensors change almost every minute by a cent. Show them
         # once per quarter (the price interval) to keep the recorder small;
@@ -285,6 +322,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "power_kw": plan_input.charge_power_kw,
             "charger_amps": self.charger_amps,
             "charger_phases": self.charger_phases,
+            "car_paused": self.car_paused_by_us,
             "solar_before_deadline": plan_input.solar_before_deadline_kwh,
             "prices_known": len(prices),
             "sim": self._sim_shown,
@@ -356,10 +394,24 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Short changes (a few seconds at 6 A, as seen in practice) are
         ignored: a new current only counts once it has held for 2 minutes.
         """
-        state = self._state(CONF_CHARGER_CURRENT)
-        amps = _float(state)
-        if state is not None and amps is not None and amps > 0:
-            steady = (now - state.last_changed).total_seconds() >= CURRENT_SETTLE_S
+        current = self._state(CONF_CHARGER_CURRENT)
+        amps = _float(current)
+        changed = current.last_changed if current is not None else now
+        safe = self._state(CONF_CHARGER_SAFE)
+        if safe is not None and safe.attributes.get("safe_limit_active"):
+            # The charger fell back to its safety limit (seen at night on
+            # wifi: mostly 6 A). Plan with what it really allows.
+            safe_amps = _float(safe)
+            if safe_amps and safe_amps > 0:
+                amps = min(amps, safe_amps) if amps else safe_amps
+                changed = max(changed, safe.last_changed)
+        if amps is not None and amps > 0:
+            if amps != self._amps_candidate:
+                # settle from when the value really changed, not when seen
+                self._amps_candidate = amps
+                self._amps_candidate_since = changed
+            steady = ((now - self._amps_candidate_since).total_seconds()
+                      >= CURRENT_SETTLE_S) if self._amps_candidate_since else True
             if steady or self.charger_amps is None:
                 self.charger_amps = amps
         phases = self._phases()
@@ -427,10 +479,11 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.measured_power_kw = 0.9 * self.measured_power_kw + 0.1 * kw
 
         set_kw = self._set_power_kw()
-        amps_state = self._state(CONF_CHARGER_CURRENT)
-        if not set_kw or amps_state is None:
+        if not set_kw or self._amps_candidate_since is None:
             return
-        if (now - amps_state.last_changed).total_seconds() < LEARN_SETTLE_S:
+        if self._amps_candidate != self.charger_amps:
+            return  # a change is still settling
+        if (now - self._amps_candidate_since).total_seconds() < LEARN_SETTLE_S:
             return  # the measurement window may still hold the old current
         if not self._mode_is(self.conf(CONF_MANUAL_OPTION)):
             return  # green mode may charge on one phase or at a lower current
@@ -504,10 +557,44 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         sim["dyn_day"] += dyn
                         sim["dyn_month"] += dyn
             sim["last_import"], sim["last_export"] = imp, exp
+        if imp is not None:
+            self._sample_import(now, imp)
             # Batch writes to the own .storage file (not the recorder DB):
             # at most once every 5 minutes, and always on shutdown.
             self._schedule_save()
         return dict(sim)
+
+    def _battery_kw(self) -> float | None:
+        """Home battery power in kW: + discharging, - charging (None if unknown)."""
+        state = self._state(CONF_BATTERY_POWER)
+        value = _float(state)
+        if value is None or state is None:
+            return None
+        unit = str(state.attributes.get("unit_of_measurement", "W")).lower()
+        return value if unit == "kw" else value / 1000
+
+    def _sample_import(self, now: datetime, imp: float) -> None:
+        """Grid import over the last ~minute, from the P1 total.
+
+        ``load_kw`` is that import without the home battery: a battery that
+        charges from the grid (seen: 7.5 kW at night) is taken out, one that
+        discharges is added back. That leaves house + car.
+        """
+        battery = self._battery_kw()
+        if self._import_sample is not None:
+            then, value, battery_then = self._import_sample
+            seconds = (now - then).total_seconds()
+            if seconds < 20:
+                return  # too short to say anything; keep the older sample
+            if seconds <= 300 and imp >= value:
+                self.import_kw = (imp - value) / (seconds / 3600)
+                known = [b for b in (battery, battery_then) if b is not None]
+                self.load_kw = (self.import_kw + sum(known) / len(known)
+                                if known else None)
+            else:
+                self.import_kw = None  # gap or meter reset
+                self.load_kw = None
+        self._import_sample = (now, imp, battery)
 
     def _stored_data(self) -> dict[str, Any]:
         return {
@@ -516,6 +603,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "measured_power_kw": self.measured_power_kw,
             "charge_factor": self.charge_factor,
             "charger_phases": self.charger_phases,
+            "car_paused_by_us": self.car_paused_by_us,
         }
 
     # -- steering (only when the active switch is on) -------------------------
@@ -525,6 +613,17 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         green = self.conf(CONF_GREEN_OPTION)
         manual = self.conf(CONF_MANUAL_OPTION)
 
+        if self.car_paused_by_us and not self._plugged():
+            # Unplugged: a pause belongs to the charging session that ended.
+            self._clear_car_pause("auto losgekoppeld")
+        if (self.car_paused_by_us and plan.needed_kwh > 0
+                and self.data_deadline is not None
+                and (self.data_deadline - now).total_seconds() <= CAR_FINAL_RESTART_S):
+            # Energy still needed: whatever the plan says, never leave the
+            # car paused this close to the deadline. (Paused at the target
+            # it may stay paused until unplugged: un-pausing would let it
+            # charge past the target while the charger ignores "off".)
+            await self._press_car_start(now)
         if plan.mode == pl.MODE_PREVIEW:
             return
         if plan.mode == pl.MODE_IDLE:
@@ -607,6 +706,11 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                  if self._commanded_at else None)
 
         if on:
+            if self.car_paused_by_us:
+                if self._charging_seen_since(self._last_start_press):
+                    self._clear_car_pause("laadt weer")
+                elif await self._press_car_start(now):
+                    return  # car first; the charger follows next minute
             if reported_on or self._power_shows_charging():
                 self._commanded = True
                 self._off_sends = 0
@@ -618,6 +722,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._send(entity_id, True, now, reported_on)
             return
 
+        await self._maybe_pause_car(now)
         busy = (reported_on or self._power_shows_charging()
                 or self._car_says_charging() or self._commanded is True)
         if not busy:
@@ -661,6 +766,9 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._stop_warned = False
         if attempt == 1:
             self._stop_started_at = now
+            self._import_kw_at_stop = self.import_kw
+            self._load_kw_at_stop = self.load_kw
+            self._pause_presses = 0
         if not on:
             self._off_sent_seen_on = reported_on
         await self._ask_fast_updates(entity_id)
@@ -678,3 +786,136 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except Exception as err:  # noqa: BLE001 - best effort only
             _LOGGER.debug("Laadplanner: live stream aanvragen mislukt: %s", err)
+
+    # -- FordPass fallback ------------------------------------------------------
+
+    def _p1_shows_charging_continues(self) -> bool:
+        """The P1 meter says the car kept charging after our stop.
+
+        Before the stop the load (import without the home battery) included
+        the car; if it has not dropped by at least half the charging power
+        since, the car still charges. Independent of both clouds. Not
+        usable when the car ran on solar.
+        """
+        before, now_kw = self._load_kw_at_stop, self.load_kw
+        if before is None or now_kw is None:
+            return False
+        car_kw = self._charge_power_kw()
+        if before < 0.6 * car_kw:
+            return False  # the car was not visibly on the grid before
+        return before - now_kw < 0.5 * car_kw
+
+    def _p1_import_shows_charging_continues(self) -> bool:
+        """Same, on raw import (battery unknown): only used with a second signal."""
+        before, now_kw = self._import_kw_at_stop, self.import_kw
+        if before is None or now_kw is None:
+            return False
+        car_kw = self._charge_power_kw()
+        if before < 0.6 * car_kw:
+            return False
+        return before - now_kw < 0.5 * car_kw
+
+    def _charging_seen_since(self, moment: datetime | None) -> bool:
+        """Proof that the car charges again, newer than ``moment``.
+
+        Only the charger's own power or a fresh FordPass "in progress":
+        never the P1 meter, because a home battery charging from the grid
+        could look like the car and the pause would wrongly be cleared.
+        """
+        if self._power_shows_charging():
+            return True
+        car = self._state(CONF_CAR_STATUS)
+        return (moment is not None and car is not None and car.state not in _BAD
+                and str(car.state).lower() in CAR_CHARGING_STATES
+                and self._car_data_newer_than(moment, car))
+
+    def _button_ready(self, key: str) -> str | None:
+        entity_id = self.conf(key)
+        state = self.hass.states.get(entity_id) if entity_id else None
+        if state is None or state.state == STATE_UNAVAILABLE:
+            return None
+        return entity_id
+
+    async def _maybe_pause_car(self, now: datetime) -> None:
+        """Pause the car via FordPass when the charger ignores our stop."""
+        if self._commanded is not False or self._stop_started_at is None:
+            return
+        if (now - self._stop_started_at).total_seconds() < CAR_PAUSE_AFTER_S:
+            return
+        if self._pause_presses >= CAR_PAUSE_MAX_PRESSES:
+            return
+        if (self._last_pause_press is not None
+                and (now - self._last_pause_press).total_seconds() < CAR_PAUSE_REPEAT_S):
+            return
+        if self._battery_kw() is not None:
+            # battery known: corrected P1 is a signal of its own
+            proof = self._car_says_charging() or self._p1_shows_charging_continues()
+        else:
+            # battery unknown: a battery charging from the grid could look
+            # like the car, so raw P1 only counts together with FordPass
+            proof = (self._car_says_charging()
+                     and self._p1_import_shows_charging_continues())
+        if not proof:
+            return
+        entity_id = self._button_ready(CONF_CAR_PAUSE)
+        if entity_id is None:
+            return  # no FordPass buttons: rely on the charger only
+        _LOGGER.info("Laadplanner: paal negeert 'uit'; auto via FordPass gepauzeerd")
+        # Remember first, so the restart is guaranteed even if HA restarts.
+        self.car_paused_by_us = True
+        self._car_paused_at = now
+        self._pause_presses += 1
+        self._last_pause_press = now
+        self._start_presses = 0
+        self._start_warned = False
+        self._last_start_press = None
+        await self.async_save()
+        await self.hass.services.async_call(
+            "button", "press", {"entity_id": entity_id}, blocking=False,
+        )
+
+    async def _press_car_start(self, now: datetime, force: bool = False) -> bool:
+        """Press the car's start button, at most every few minutes.
+
+        Returns True if it was pressed now.
+        """
+        if not self.car_paused_by_us:
+            return False
+        retry = (CAR_START_SLOW_RETRY_S if self._start_presses >= CAR_START_WARN_AFTER
+                 else CAR_START_RETRY_S)
+        if (not force and self._last_start_press is not None
+                and (now - self._last_start_press).total_seconds() < retry):
+            return False
+        entity_id = self._button_ready(CONF_CAR_START)
+        if entity_id is None:
+            if not self._start_warned:
+                self._start_warned = True
+                _LOGGER.warning(
+                    "Laadplanner: auto staat door mij op pauze, maar de startknop van "
+                    "FordPass is niet beschikbaar. Start het laden via de auto of de app."
+                )
+            return False
+        self._last_start_press = now
+        self._start_presses += 1
+        _LOGGER.info("Laadplanner: auto via FordPass weer gestart (poging %s)",
+                     self._start_presses)
+        if self._start_presses >= CAR_START_WARN_AFTER and not self._start_warned:
+            self._start_warned = True
+            _LOGGER.warning(
+                "Laadplanner: auto na %s keer starten via FordPass nog niet aan het "
+                "laden. Controleer de auto.", self._start_presses,
+            )
+        await self.hass.services.async_call(
+            "button", "press", {"entity_id": entity_id}, blocking=False,
+        )
+        return True
+
+    def _clear_car_pause(self, reason: str) -> None:
+        if not self.car_paused_by_us:
+            return
+        _LOGGER.info("Laadplanner: pauze van de auto opgeheven (%s)", reason)
+        self.car_paused_by_us = False
+        self._car_paused_at = None
+        self._start_presses = 0
+        self._start_warned = False
+        self._schedule_save()
