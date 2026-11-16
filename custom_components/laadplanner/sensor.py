@@ -111,6 +111,7 @@ class PlannerSensor(LaadplannerEntity, SensorEntity):
             "laadvermogen_kw",
             "laadstroom_a",
             "fasen",
+            "auto_gepauzeerd",
             "bekende_prijzen",
             "sturing_actief",
             "kwh_zonder_prijs",
@@ -152,6 +153,7 @@ class PlannerSensor(LaadplannerEntity, SensorEntity):
                 "laadvermogen_kw": round(data["power_kw"], 1),
                 "laadstroom_a": data["charger_amps"],
                 "fasen": data["charger_phases"],
+                "auto_gepauzeerd": data["car_paused"],
                 "bekende_prijzen": data["prices_known"],
                 "sturing_actief": bool(self.coordinator.settings.get("active")),
             }

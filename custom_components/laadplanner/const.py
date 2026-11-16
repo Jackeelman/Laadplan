@@ -9,6 +9,13 @@ MIN_SWITCH_INTERVAL_S = 120  # never toggle the charger faster than this
 START_CONFIRM_S = 300        # the Enphase cloud may take this long to show a start
 STOP_RESEND_S = 120          # repeat "off" this often while charging still shows
 STOP_MAX_RESENDS = 5         # ... but not more often than this per stop
+# FordPass fallback: pause the car itself when the charger ignores "off"
+CAR_PAUSE_AFTER_S = 150      # after the first "off", wait this long for proof
+CAR_PAUSE_REPEAT_S = 300     # press pause again after this, if still charging
+CAR_PAUSE_MAX_PRESSES = 2
+CAR_START_RETRY_S = 180      # press start again until the car charges
+CAR_START_WARN_AFTER = 5     # warn once after this many unconfirmed starts
+CAR_FINAL_RESTART_S = 5400   # always un-pause this long before the deadline
 VOLTAGE = 230.0              # grid voltage per phase
 CURRENT_SETTLE_S = 120       # ignore current changes shorter than this
 LEARN_SETTLE_S = 300         # learn the car's share only at a steady current
@@ -37,6 +44,9 @@ CONF_CAR_STATUS = "car_charge_status_entity"
 CONF_CAR_REFRESH = "car_last_refresh_entity"
 CONF_CHARGER_CURRENT = "charger_current_entity"
 CONF_CHARGER_PHASES = "charger_phases_entity"
+CONF_CHARGER_SAFE = "charger_safe_limit_entity"
+CONF_CAR_PAUSE = "car_pause_entity"
+CONF_CAR_START = "car_start_entity"
 CONF_CAPACITY = "capacity_kwh"
 CONF_GREEN_OPTION = "green_option"
 CONF_MANUAL_OPTION = "manual_option"
@@ -48,6 +58,9 @@ OPTIONAL_ENTITIES = (
     "car_last_refresh_entity",
     "charger_current_entity",
     "charger_phases_entity",
+    "charger_safe_limit_entity",
+    "car_pause_entity",
+    "car_start_entity",
 )
 
 DEFAULTS = {
@@ -63,6 +76,9 @@ DEFAULTS = {
     CONF_CHARGER_POWER: "sensor.iq_ev_charger_1219_vermogen",
     CONF_CHARGER_CURRENT: "number.auto_iq_ev_charger_1219_standaard_laadniveau",
     CONF_CHARGER_PHASES: "sensor.iq_ev_charger_1219_elektrische_fase",
+    CONF_CHARGER_SAFE: "sensor.iq_ev_charger_1219_ampere_instellen",
+    CONF_CAR_PAUSE: "button.fordpass_jouw_vin_evpause",
+    CONF_CAR_START: "button.fordpass_jouw_vin_evstart",
     CONF_CAR_STATUS: "sensor.fordpass_jouw_vin_elvehcharging",
     CONF_CAR_REFRESH: "sensor.fordpass_jouw_vin_lastrefresh",
     CONF_CAPACITY: 77.0,

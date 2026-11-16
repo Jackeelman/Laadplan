@@ -33,8 +33,10 @@ Daarna: **Instellingen → Apparaten en diensten → Integratie toevoegen → La
 | Laadvermogen (optioneel) | `sensor.iq_ev_charger_1219_vermogen` |
 | Ingestelde laadstroom (optioneel) | `number.auto_iq_ev_charger_1219_standaard_laadniveau` |
 | Fasen laadpaal (optioneel) | `sensor.iq_ev_charger_1219_elektrische_fase` |
+| Gebruikte laadstroom (optioneel) | `sensor.iq_ev_charger_1219_ampere_instellen` |
 | Laadstatus auto (optioneel) | `sensor.fordpass_jouw_vin_elvehcharging` |
 | Auto laatst vernieuwd (optioneel) | `sensor.fordpass_jouw_vin_lastrefresh` |
+| Auto: laden pauzeren / starten (optioneel) | `button.fordpass_jouw_vin_evpause` / `button.fordpass_jouw_vin_evstart` |
 
 ## Na installatie instellen
 
@@ -94,6 +96,24 @@ De Enphase-cloud meldt de stand van de laadpaal minuten te laat (getest 15-11-20
 - Na elk stuurcommando vraagt hij de Enphase-integratie (als die `start_live_stream` heeft) om een tijd lang snellere cloudupdates.
 - Elk stuurcommando staat op info-niveau in het log ("Laadplanner: laadpaal aan/uit").
 - Het deel dat de auto van het ingestelde vermogen opneemt, leert hij alleen als de paal op Handmatig staat (Groen kan op één fase laden).
+
+## Terugvaloptie via de auto (FordPass)
+
+Kent de Enphase-cloud de laadsessie niet, dan negeert de paal elk "uit", ook dat van de Enphase-app (gezien op 15-11, zie issue #10). Dan pauzeert de module de **auto** zelf via FordPass:
+
+- **Wanneer:** 2,5 minuut na het eerste "uit" laadt de auto nog. Dat blijkt uit de **P1-meter** (de import is niet met minstens de helft van het laadvermogen gedaald; werkt niet als de auto op zon laadde) of uit een **verse** laadstatus van FordPass. Op de Enphase-cloud wordt hierbij niet vertrouwd. Hooguit 2 keer per stop.
+- **Nooit op pauze laten hangen:**
+  - "Zelf gepauzeerd" wordt meteen opgeslagen en overleeft een herstart van HA.
+  - Moet er weer geladen worden, dan eerst `evstart` op de auto, een minuut later de paal. `evstart` herhaalt hij elke 3 minuten tot de auto zichtbaar laadt (laadvermogen, P1 of FordPass); na 5 pogingen één waarschuwing in het log.
+  - Ongeacht het plan drukt hij **anderhalf uur voor de deadline** altijd op `evstart`.
+  - Zet je de sturing uit, dan heft hij de pauze meteen op.
+  - Koppel je de auto los, dan vervalt de pauze.
+- **Knoppen niet beschikbaar** (bijvoorbeeld als de auto niet aangesloten is): dan slaat hij deze stap over en gebruikt hij alleen de paal. Kan hij een eigen pauze niet opheffen, dan komt er een waarschuwing.
+- Het attribuut `auto_gepauzeerd` van `sensor.laadplanner_plan` laat zien of de module de auto heeft gepauzeerd.
+
+## Veiligheidsstand van de paal (6 A)
+
+Valt de paal terug op zijn veiligheidsstand (`safe_limit_active` op `sensor.iq_ev_charger_1219_ampere_instellen`, gezien 's nachts via wifi), dan rekent het plan met de stroom die de paal dan echt geeft (meestal 6 A) in plaats van het standaard laadniveau. Korte uitschieters (seconden) telt hij niet mee.
 
 ## Bekende beperkingen
 
