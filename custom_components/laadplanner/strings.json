@@ -22,6 +22,7 @@
           "car_last_refresh_entity": "Car data last refreshed (optional, guards against a stale status)",
           "car_pause_entity": "Car: pause charging button (optional, fallback when the charger ignores off)",
           "car_start_entity": "Car: start charging button (optional, undoes that pause)",
+          "battery_power_entity": "Home battery power (optional, W, + = discharging, - = charging)",
           "capacity_kwh": "Car battery capacity",
           "green_option": "Name of the green charge mode",
           "manual_option": "Name of the manual charge mode"
@@ -54,6 +55,7 @@
           "car_last_refresh_entity": "Car data last refreshed (optional, guards against a stale status)",
           "car_pause_entity": "Car: pause charging button (optional, fallback when the charger ignores off)",
           "car_start_entity": "Car: start charging button (optional, undoes that pause)",
+          "battery_power_entity": "Home battery power (optional, W, + = discharging, - = charging)",
           "capacity_kwh": "Car battery capacity",
           "green_option": "Name of the green charge mode",
           "manual_option": "Name of the manual charge mode"

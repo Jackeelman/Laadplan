@@ -11,6 +11,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_BATTERY_POWER,
     CONF_CAPACITY,
     CONF_CAR_PAUSE,
     CONF_CAR_REFRESH,
@@ -54,6 +55,7 @@ _ENTITY_FIELDS = {
     CONF_CAR_REFRESH: ["sensor"],
     CONF_CAR_PAUSE: ["button"],
     CONF_CAR_START: ["button"],
+    CONF_BATTERY_POWER: ["sensor"],
 }
 
 

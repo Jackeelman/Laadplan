@@ -22,6 +22,7 @@
           "car_last_refresh_entity": "Auto laatst vernieuwd (optioneel, voorkomt een verouderde laadstatus)",
           "car_pause_entity": "Auto: knop laden pauzeren (optioneel, terugval als de paal 'uit' negeert)",
           "car_start_entity": "Auto: knop laden starten (optioneel, heft die pauze weer op)",
+          "battery_power_entity": "Vermogen thuisaccu (optioneel, W, + = ontladen, - = laden)",
           "capacity_kwh": "Accucapaciteit auto",
           "green_option": "Naam van de groene laadmodus",
           "manual_option": "Naam van de handmatige laadmodus"
@@ -54,6 +55,7 @@
           "car_last_refresh_entity": "Auto laatst vernieuwd (optioneel, voorkomt een verouderde laadstatus)",
           "car_pause_entity": "Auto: knop laden pauzeren (optioneel, terugval als de paal 'uit' negeert)",
           "car_start_entity": "Auto: knop laden starten (optioneel, heft die pauze weer op)",
+          "battery_power_entity": "Vermogen thuisaccu (optioneel, W, + = ontladen, - = laden)",
           "capacity_kwh": "Accucapaciteit auto",
           "green_option": "Naam van de groene laadmodus",
           "manual_option": "Naam van de handmatige laadmodus"

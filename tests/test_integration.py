@@ -521,12 +521,14 @@ async def test_live_stream_requested_after_command(hass: HomeAssistant) -> None:
 PAUSE = "button.fordpass_jouw_vin_evpause"
 START = "button.fordpass_jouw_vin_evstart"
 IMPORT = "sensor.meterkast_p1_meter_hw_energie_import"
+BATTERY = "sensor.energy_battery_batterij_ontladen_batterij_laden_net_power"
 
 
 async def _charging_ignored_stop(hass, freezer, entry, import_kwh_per_min=0.18):
     """Car charges ~10.8 kW, planner stops, charger keeps going."""
     hass.states.async_set(PAUSE, "unknown")
     hass.states.async_set(START, "unknown")
+    hass.states.async_set(BATTERY, "0", {"unit_of_measurement": "W"})  # battery idle
     hass.states.async_set("switch.iq_ev_charger_1219", "on")
     async_mock_service(hass, "switch", "turn_off")
     async_mock_service(hass, "switch", "turn_on")
@@ -620,10 +622,10 @@ async def test_paused_car_restarted_first_and_repeated_until_charging(hass: Home
         await coordinator.async_refresh()
         await hass.async_block_till_done()
     assert [c.data["entity_id"] for c in press] == [START, START]
-    # charging visible on the P1 meter: pause cleared
+    # charging visible on the charger's own power: pause cleared
     freezer.tick(timedelta(minutes=1))
-    level += 0.18
-    hass.states.async_set(IMPORT, f"{level:.3f}")
+    hass.states.async_set("sensor.iq_ev_charger_1219_vermogen", "10800",
+                          {"unit_of_measurement": "W"})
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     assert not coordinator.car_paused_by_us
@@ -664,3 +666,76 @@ async def test_safety_limit_lowers_planned_current(hass: HomeAssistant, freezer)
     await _setup(hass)
     plan = hass.states.get("sensor.laadplanner_plan")
     assert plan.attributes["laadstroom_a"] == 6.0
+
+
+
+async def test_battery_charging_from_grid_is_not_taken_for_the_car(hass: HomeAssistant, freezer) -> None:
+    """Review #11: the home battery charging at 7.5 kW must not look like the car."""
+    entry = await _setup(hass)
+    coordinator, press, level = await _charging_ignored_stop(hass, freezer, entry)
+    hass.states.async_set(BATTERY, "-7474", {"unit_of_measurement": "W"})
+    for _ in range(4):
+        freezer.tick(timedelta(minutes=1))
+        level += 0.133  # 8 kW import: battery 7.5 + house 0.5, car stopped
+        hass.states.async_set(IMPORT, f"{level:.3f}")
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert press == []
+
+
+async def test_battery_unknown_needs_fordpass_as_well(hass: HomeAssistant, freezer) -> None:
+    entry = await _setup(hass)
+    coordinator, press, level = await _charging_ignored_stop(hass, freezer, entry)
+    hass.states.async_remove(BATTERY)
+    for _ in range(4):  # P1 alone: not enough
+        freezer.tick(timedelta(minutes=1))
+        level += 0.18
+        hass.states.async_set(IMPORT, f"{level:.3f}")
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert press == []
+    # FordPass, refreshed after the stop, confirms: now pause
+    hass.states.async_set("sensor.fordpass_jouw_vin_elvehcharging", "IN_PROGRESS")
+    hass.states.async_set("sensor.fordpass_jouw_vin_lastrefresh", dt_util.utcnow().isoformat())
+    freezer.tick(timedelta(minutes=1))
+    level += 0.18
+    hass.states.async_set(IMPORT, f"{level:.3f}")
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert [c.data["entity_id"] for c in press] == [PAUSE]
+
+
+async def test_restart_not_confirmed_by_p1(hass: HomeAssistant, freezer) -> None:
+    """Review #11: high import (battery) must not clear the car's pause."""
+    entry, coordinator, press, level = await _paused(hass, freezer)
+    async_mock_service(hass, "switch", "turn_on")
+    await coordinator.async_set("strategy", "direct")
+    await hass.async_block_till_done()
+    hass.states.async_set(BATTERY, "-7474", {"unit_of_measurement": "W"})
+    for _ in range(3):
+        freezer.tick(timedelta(minutes=1))
+        level += 0.133
+        hass.states.async_set(IMPORT, f"{level:.3f}")
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert coordinator.car_paused_by_us
+    # the charger's own power does confirm it
+    hass.states.async_set("sensor.iq_ev_charger_1219_vermogen", "10800",
+                          {"unit_of_measurement": "W"})
+    freezer.tick(timedelta(minutes=1))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert not coordinator.car_paused_by_us
+
+
+async def test_pause_at_target_is_not_undone_before_deadline(hass: HomeAssistant, freezer) -> None:
+    """Review #11: un-pausing at the target would charge past it."""
+    entry, coordinator, press, level = await _paused(hass, freezer)
+    hass.states.async_set("sensor.fordpass_jouw_vin_soc", "80")  # target reached
+    deadline = coordinator.data_deadline
+    freezer.move_to(deadline - timedelta(minutes=80))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.laadplanner_plan").state == "geen"
+    assert press == []
+    assert coordinator.car_paused_by_us

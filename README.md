@@ -37,6 +37,7 @@ Daarna: **Instellingen → Apparaten en diensten → Integratie toevoegen → La
 | Laadstatus auto (optioneel) | `sensor.fordpass_jouw_vin_elvehcharging` |
 | Auto laatst vernieuwd (optioneel) | `sensor.fordpass_jouw_vin_lastrefresh` |
 | Auto: laden pauzeren / starten (optioneel) | `button.fordpass_jouw_vin_evpause` / `button.fordpass_jouw_vin_evstart` |
+| Vermogen thuisaccu (optioneel, W, + = ontladen) | `sensor.energy_battery_batterij_ontladen_batterij_laden_net_power` |
 
 ## Na installatie instellen
 
@@ -101,11 +102,15 @@ De Enphase-cloud meldt de stand van de laadpaal minuten te laat (getest 15-11-20
 
 Kent de Enphase-cloud de laadsessie niet, dan negeert de paal elk "uit", ook dat van de Enphase-app (gezien op 15-11, zie issue #10). Dan pauzeert de module de **auto** zelf via FordPass:
 
-- **Wanneer:** 2,5 minuut na het eerste "uit" laadt de auto nog. Dat blijkt uit de **P1-meter** (de import is niet met minstens de helft van het laadvermogen gedaald; werkt niet als de auto op zon laadde) of uit een **verse** laadstatus van FordPass. Op de Enphase-cloud wordt hierbij niet vertrouwd. Hooguit 2 keer per stop.
+- **Wanneer:** 2,5 minuut na het eerste "uit" laadt de auto nog. Dat blijkt uit:
+  - de **P1-meter, gecorrigeerd voor de thuisaccu**: het verbruik zonder accu is niet met minstens de helft van het laadvermogen gedaald sinds vlak voor de stop. Een accu die van het net laadt (tot 7,5 kW) telt dus niet als auto. Werkt niet als de auto op zon laadde.
+  - of een **verse** laadstatus van FordPass (ververst na de stop).
+  - Is het accuvermogen onbekend, dan zijn **beide** nodig: P1 én FordPass.
+  - Op de Enphase-cloud wordt hierbij niet vertrouwd. Hooguit 2 keer per stop.
 - **Nooit op pauze laten hangen:**
   - "Zelf gepauzeerd" wordt meteen opgeslagen en overleeft een herstart van HA.
-  - Moet er weer geladen worden, dan eerst `evstart` op de auto, een minuut later de paal. `evstart` herhaalt hij elke 3 minuten tot de auto zichtbaar laadt (laadvermogen, P1 of FordPass); na 5 pogingen één waarschuwing in het log.
-  - Ongeacht het plan drukt hij **anderhalf uur voor de deadline** altijd op `evstart`.
+  - Moet er weer geladen worden, dan eerst `evstart` op de auto, een minuut later de paal. `evstart` herhaalt hij elke 3 minuten tot de auto zichtbaar laadt; na 5 pogingen één waarschuwing en daarna elke 10 minuten. Als bewijs telt alleen het vermogen van de paal of een verse `IN_PROGRESS` van FordPass, **niet de P1-meter**: een accu die van het net laadt zou de pauze dan ten onrechte opheffen.
+  - Is er nog energie nodig, dan drukt hij ongeacht het plan **anderhalf uur voor de deadline** altijd op `evstart`. Is het doel bereikt, dan blijft een pauze staan tot je de auto loskoppelt: opheffen zou de auto boven het doel laten doorladen terwijl de paal "uit" negeert.
   - Zet je de sturing uit, dan heft hij de pauze meteen op.
   - Koppel je de auto los, dan vervalt de pauze.
 - **Knoppen niet beschikbaar** (bijvoorbeeld als de auto niet aangesloten is): dan slaat hij deze stap over en gebruikt hij alleen de paal. Kan hij een eigen pauze niet opheffen, dan komt er een waarschuwing.

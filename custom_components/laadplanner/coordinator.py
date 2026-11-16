@@ -22,6 +22,7 @@ from .const import (
     CAR_PAUSE_MAX_PRESSES,
     CAR_PAUSE_REPEAT_S,
     CAR_START_RETRY_S,
+    CAR_START_SLOW_RETRY_S,
     CAR_START_WARN_AFTER,
     CAR_CHARGING_STATES,
     START_CONFIRM_S,
@@ -33,6 +34,7 @@ from .const import (
     VIN_PLACEHOLDER,
     VOLTAGE,
     CAR_DONE_STATES,
+    CONF_BATTERY_POWER,
     CONF_CAPACITY,
     CONF_CAR_PAUSE,
     CONF_CAR_REFRESH,
@@ -192,8 +194,10 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # moment of the last stop: the one signal that does not depend on
         # the Enphase or Ford cloud.
         self.import_kw: float | None = None
-        self._import_sample: tuple[datetime, float] | None = None
+        self.load_kw: float | None = None
+        self._import_sample: tuple[datetime, float, float | None] | None = None
         self._import_kw_at_stop: float | None = None
+        self._load_kw_at_stop: float | None = None
         # FordPass fallback: the car paused by us must always be restarted.
         self.car_paused_by_us = False
         self._car_paused_at: datetime | None = None
@@ -560,18 +564,37 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._schedule_save()
         return dict(sim)
 
+    def _battery_kw(self) -> float | None:
+        """Home battery power in kW: + discharging, - charging (None if unknown)."""
+        state = self._state(CONF_BATTERY_POWER)
+        value = _float(state)
+        if value is None or state is None:
+            return None
+        unit = str(state.attributes.get("unit_of_measurement", "W")).lower()
+        return value if unit == "kw" else value / 1000
+
     def _sample_import(self, now: datetime, imp: float) -> None:
-        """Grid import power over the last ~minute, from the P1 total."""
+        """Grid import over the last ~minute, from the P1 total.
+
+        ``load_kw`` is that import without the home battery: a battery that
+        charges from the grid (seen: 7.5 kW at night) is taken out, one that
+        discharges is added back. That leaves house + car.
+        """
+        battery = self._battery_kw()
         if self._import_sample is not None:
-            then, value = self._import_sample
+            then, value, battery_then = self._import_sample
             seconds = (now - then).total_seconds()
             if seconds < 20:
                 return  # too short to say anything; keep the older sample
             if seconds <= 300 and imp >= value:
                 self.import_kw = (imp - value) / (seconds / 3600)
+                known = [b for b in (battery, battery_then) if b is not None]
+                self.load_kw = (self.import_kw + sum(known) / len(known)
+                                if known else None)
             else:
                 self.import_kw = None  # gap or meter reset
-        self._import_sample = (now, imp)
+                self.load_kw = None
+        self._import_sample = (now, imp, battery)
 
     def _stored_data(self) -> dict[str, Any]:
         return {
@@ -593,10 +616,13 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.car_paused_by_us and not self._plugged():
             # Unplugged: a pause belongs to the charging session that ended.
             self._clear_car_pause("auto losgekoppeld")
-        if self.car_paused_by_us and self.data_deadline is not None and (
-                self.data_deadline - now).total_seconds() <= CAR_FINAL_RESTART_S:
-            # Whatever the plan says: never leave the car paused this close
-            # to the deadline.
+        if (self.car_paused_by_us and plan.needed_kwh > 0
+                and self.data_deadline is not None
+                and (self.data_deadline - now).total_seconds() <= CAR_FINAL_RESTART_S):
+            # Energy still needed: whatever the plan says, never leave the
+            # car paused this close to the deadline. (Paused at the target
+            # it may stay paused until unplugged: un-pausing would let it
+            # charge past the target while the charger ignores "off".)
             await self._press_car_start(now)
         if plan.mode == pl.MODE_PREVIEW:
             return
@@ -741,6 +767,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if attempt == 1:
             self._stop_started_at = now
             self._import_kw_at_stop = self.import_kw
+            self._load_kw_at_stop = self.load_kw
             self._pause_presses = 0
         if not on:
             self._off_sent_seen_on = reported_on
@@ -765,11 +792,12 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _p1_shows_charging_continues(self) -> bool:
         """The P1 meter says the car kept charging after our stop.
 
-        Before the stop the import included the car; if it has not dropped
-        by at least half the charging power since, the car still charges.
-        Independent of both clouds. Not usable when the car ran on solar.
+        Before the stop the load (import without the home battery) included
+        the car; if it has not dropped by at least half the charging power
+        since, the car still charges. Independent of both clouds. Not
+        usable when the car ran on solar.
         """
-        before, now_kw = self._import_kw_at_stop, self.import_kw
+        before, now_kw = self._load_kw_at_stop, self.load_kw
         if before is None or now_kw is None:
             return False
         car_kw = self._charge_power_kw()
@@ -777,17 +805,29 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False  # the car was not visibly on the grid before
         return before - now_kw < 0.5 * car_kw
 
+    def _p1_import_shows_charging_continues(self) -> bool:
+        """Same, on raw import (battery unknown): only used with a second signal."""
+        before, now_kw = self._import_kw_at_stop, self.import_kw
+        if before is None or now_kw is None:
+            return False
+        car_kw = self._charge_power_kw()
+        if before < 0.6 * car_kw:
+            return False
+        return before - now_kw < 0.5 * car_kw
+
     def _charging_seen_since(self, moment: datetime | None) -> bool:
-        """Any sign the car charges, newer than ``moment``."""
+        """Proof that the car charges again, newer than ``moment``.
+
+        Only the charger's own power or a fresh FordPass "in progress":
+        never the P1 meter, because a home battery charging from the grid
+        could look like the car and the pause would wrongly be cleared.
+        """
         if self._power_shows_charging():
             return True
         car = self._state(CONF_CAR_STATUS)
-        if (moment is not None and car is not None and car.state not in _BAD
+        return (moment is not None and car is not None and car.state not in _BAD
                 and str(car.state).lower() in CAR_CHARGING_STATES
-                and self._car_data_newer_than(moment, car)):
-            return True
-        car_kw = self._charge_power_kw()
-        return self.import_kw is not None and self.import_kw >= 0.6 * car_kw
+                and self._car_data_newer_than(moment, car))
 
     def _button_ready(self, key: str) -> str | None:
         entity_id = self.conf(key)
@@ -807,7 +847,15 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (self._last_pause_press is not None
                 and (now - self._last_pause_press).total_seconds() < CAR_PAUSE_REPEAT_S):
             return
-        if not (self._car_says_charging() or self._p1_shows_charging_continues()):
+        if self._battery_kw() is not None:
+            # battery known: corrected P1 is a signal of its own
+            proof = self._car_says_charging() or self._p1_shows_charging_continues()
+        else:
+            # battery unknown: a battery charging from the grid could look
+            # like the car, so raw P1 only counts together with FordPass
+            proof = (self._car_says_charging()
+                     and self._p1_import_shows_charging_continues())
+        if not proof:
             return
         entity_id = self._button_ready(CONF_CAR_PAUSE)
         if entity_id is None:
@@ -833,8 +881,10 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if not self.car_paused_by_us:
             return False
+        retry = (CAR_START_SLOW_RETRY_S if self._start_presses >= CAR_START_WARN_AFTER
+                 else CAR_START_RETRY_S)
         if (not force and self._last_start_press is not None
-                and (now - self._last_start_press).total_seconds() < CAR_START_RETRY_S):
+                and (now - self._last_start_press).total_seconds() < retry):
             return False
         entity_id = self._button_ready(CONF_CAR_START)
         if entity_id is None:
