@@ -25,7 +25,8 @@
           "battery_power_entity": "Vermogen thuisaccu (optioneel, W, + = ontladen, - = laden)",
           "capacity_kwh": "Accucapaciteit auto",
           "green_option": "Naam van de groene laadmodus",
-          "manual_option": "Naam van de handmatige laadmodus"
+          "manual_option": "Naam van de handmatige laadmodus",
+          "notify_service": "Meldingsdienst voor waarschuwingen (bv. notify.mobile_app_telefoon, optioneel)"
         }
       }
     },
@@ -58,7 +59,8 @@
           "battery_power_entity": "Vermogen thuisaccu (optioneel, W, + = ontladen, - = laden)",
           "capacity_kwh": "Accucapaciteit auto",
           "green_option": "Naam van de groene laadmodus",
-          "manual_option": "Naam van de handmatige laadmodus"
+          "manual_option": "Naam van de handmatige laadmodus",
+          "notify_service": "Meldingsdienst voor waarschuwingen (bv. notify.mobile_app_telefoon, optioneel)"
         }
       }
     }

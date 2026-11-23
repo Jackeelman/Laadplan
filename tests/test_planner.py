@@ -207,3 +207,17 @@ def test_car_reports_completed_below_our_target():
 def test_car_completed_is_ignored_when_unplugged():
     plan = p.make_plan(base(soc_pct=70, car_done=True, plugged_in=False))
     assert plan.mode == p.MODE_PREVIEW
+
+
+def test_topup_hysteresis():
+    """Need ~34 kWh; sun covering 20% stays top-up once in it, but does not
+    start it (23-11: the plan flipped six times in 1.5 h)."""
+    need = p.needed_energy_kwh(base())
+    sun = 0.2 * need / 0.5          # surplus factor 0.5 -> 20% of the need
+    fresh = p.make_plan(base(solar_before_deadline_kwh=sun))
+    assert fresh.mode == p.MODE_QUARTERS
+    held = p.make_plan(base(solar_before_deadline_kwh=sun, prev_mode=p.MODE_SOLAR_TOPUP))
+    assert held.mode == p.MODE_SOLAR_TOPUP
+    low = p.make_plan(base(solar_before_deadline_kwh=0.1 * need / 0.5,
+                           prev_mode=p.MODE_SOLAR_TOPUP))
+    assert low.mode == p.MODE_QUARTERS

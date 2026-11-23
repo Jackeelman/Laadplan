@@ -27,6 +27,12 @@ from .const import (
     CAR_CHARGING_STATES,
     START_CONFIRM_S,
     STOP_MAX_RESENDS,
+    STOP_ROUND_RETRY_S,
+    START_STUCK_RETRY_S,
+    START_STUCK_S,
+    START_STUCK_TRIES,
+    MODE_HOLD_S,
+    CONF_NOTIFY,
     STOP_RESEND_S,
     CURRENT_SETTLE_S,
     DEFAULT_CHARGE_FACTOR,
@@ -78,6 +84,8 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+STOP_REASON_STILL = "laadt nog steeds"
 
 _BAD = (None, "", STATE_UNKNOWN, STATE_UNAVAILABLE)
 _PLUGGED_WORDS = {"on", "true", "connected", "plugged", "plugged_in",
@@ -187,6 +195,13 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._off_sent_seen_on = True
         self._stop_warned = False
         self._stop_started_at: datetime | None = None
+        # Stuck start: the switch says 'on' but nothing flows (23-11: car
+        # FAULT at plug-in, charger FINISHING, switch 'on' all night).
+        self._want_on_since: datetime | None = None
+        self._stuck_tries = 0
+        self._last_stuck_try: datetime | None = None
+        self._stuck_alerted = False
+        self._last_mode_change: datetime | None = None
         # Current setting candidate, so short jumps can be ignored.
         self._amps_candidate: float | None = None
         self._amps_candidate_since: datetime | None = None
@@ -520,6 +535,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             fallback_kwh=float(self.settings[SET_FALLBACK]),
             night_start=self._night_start_time(),
             night_end=self._deadline_time(),
+            prev_mode=self.plan.mode if self.plan is not None else None,
         )
 
     # -- simulation -----------------------------------------------------------
@@ -624,6 +640,10 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # it may stay paused until unplugged: un-pausing would let it
             # charge past the target while the charger ignores "off".)
             await self._press_car_start(now)
+        if plan.mode in (pl.MODE_PREVIEW, pl.MODE_IDLE, pl.MODE_SOLAR):
+            # Not asking for a start here: a later start must not inherit
+            # an old "wanted on since" and count as stuck right away.
+            self._want_on_since = None
         if plan.mode == pl.MODE_PREVIEW:
             return
         if plan.mode == pl.MODE_IDLE:
@@ -634,28 +654,42 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._set_charging(False, now)
             return
         if plan.mode == pl.MODE_SOLAR:
-            await self._set_mode(green)
+            await self._set_mode(green, now)
             return
         if plan.mode == pl.MODE_SOLAR_TOPUP and not plan.charge_now(now):
             # Green before the first and after the last top-up quarter; in
             # between stay manual so the mode does not flip between quarters.
             if (not plan.slots or now < min(plan.slots)
                     or plan.next_start(now) is None):
-                await self._set_mode(green)
+                self._want_on_since = None
+                await self._set_mode(green, now)
                 return
-        await self._set_mode(manual)
-        await self._set_charging(plan.charge_now(now), now)
+        charge_now = plan.charge_now(now)
+        await self._set_mode(manual, now, force=charge_now)
+        await self._set_charging(charge_now, now)
 
     def _mode_is(self, option: str) -> bool:
         entity_id = self.conf(CONF_CHARGER_MODE)
         state = self.hass.states.get(entity_id) if entity_id else None
         return state is not None and state.state == option
 
-    async def _set_mode(self, option: str) -> None:
+    async def _set_mode(self, option: str, now: datetime | None = None,
+                        force: bool = False) -> None:
+        """Set the charger mode, but not more often than every MODE_HOLD_S.
+
+        Every mode change starts or stops the charger, so a plan that
+        wavers between sun and quarters must not drag the mode along.
+        ``force`` is used when charging has to start now.
+        """
         entity_id = self.conf(CONF_CHARGER_MODE)
         state = self.hass.states.get(entity_id) if entity_id else None
         if state is None or state.state == option:
             return
+        if (not force and now is not None and self._last_mode_change is not None
+                and (now - self._last_mode_change).total_seconds() < MODE_HOLD_S):
+            return
+        if now is not None:
+            self._last_mode_change = now
         _LOGGER.info("Laadplanner: laadmodus %s -> %s", state.state, option)
         await self.hass.services.async_call(
             "select", "select_option", {"entity_id": entity_id, "option": option},
@@ -711,9 +745,18 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._clear_car_pause("laadt weer")
                 elif await self._press_car_start(now):
                     return  # car first; the charger follows next minute
-            if reported_on or self._power_shows_charging():
+            if self._want_on_since is None:
+                self._want_on_since = now
+            flowing = self._power_shows_charging() or self._car_says_charging_now(now)
+            if reported_on or flowing:
                 self._commanded = True
                 self._off_sends = 0
+                # P1 only quiets the stuck check; it must never stand in for
+                # a start (a busy house would then keep the car off).
+                if flowing or self._p1_shows_car(now):
+                    self._clear_stuck("laadt")
+                else:
+                    await self._check_stuck_start(entity_id, now)
                 return
             if self._commanded is True and since is not None and since < START_CONFIRM_S:
                 return  # started recently; the cloud just hasn't caught up
@@ -722,12 +765,25 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._send(entity_id, True, now, reported_on)
             return
 
+        self._want_on_since = None
+        self._clear_stuck(None)
         await self._maybe_pause_car(now)
         busy = (reported_on or self._power_shows_charging()
                 or self._car_says_charging() or self._commanded is True)
         if not busy:
             return
         if self._commanded is False:
+            reason = self._new_stop_round_reason(state, reported_on, now)
+            if reason:
+                _LOGGER.info("Laadplanner: nieuwe stopronde (%s)", reason)
+                warned = self._stop_warned
+                self._commanded = None
+                self._off_sends = 0
+                self._off_sent_seen_on = True
+                await self._send(entity_id, False, now, reported_on)
+                if reason == STOP_REASON_STILL:
+                    self._stop_warned = warned  # same session: warn only once
+                return
             if reported_on and not self._off_sent_seen_on:
                 # Our stop went out before the cloud knew about the session
                 # and was ignored; now it does know: stop again right away.
@@ -748,6 +804,115 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return
         await self._send(entity_id, False, now, reported_on)
 
+    def _new_stop_round_reason(self, state: State, reported_on: bool,
+                               now: datetime) -> str | None:
+        """Why an earlier stop round no longer counts (None: it still does).
+
+        23-11: after 5 ignored stops at 07:00 the planner went quiet for
+        good, and let a new session (plugged in again at 07:39) charge past
+        the target until 13:26. A new session gets a new round.
+        """
+        started = self._stop_started_at
+        if started is None:
+            return None
+        plug = self._state(CONF_PLUG)
+        if plug is not None and plug.state not in _BAD and plug.last_changed > started:
+            return "auto opnieuw aangesloten"
+        if self._off_sends < STOP_MAX_RESENDS:
+            return None
+        if reported_on and state.last_changed > started:
+            return "laadpaal opnieuw gestart"
+        if ((now - started).total_seconds() >= STOP_ROUND_RETRY_S
+                and (self._power_shows_charging() or self._car_says_charging_now(now))):
+            return STOP_REASON_STILL
+        return None
+
+    def _car_says_charging_now(self, now: datetime) -> bool:
+        """The car reports charging, with data from the last 15 minutes."""
+        state = self._state(CONF_CAR_STATUS)
+        if state is None or state.state in _BAD:
+            return False
+        if str(state.state).lower() not in CAR_CHARGING_STATES:
+            return False
+        return self._car_data_newer_than(now - timedelta(minutes=15), state)
+
+    def _p1_shows_car(self, now: datetime) -> bool:
+        """House + car load (P1 without the home battery) looks like the car.
+
+        Only used to keep quiet about a stuck start: the Enphase cloud can
+        report 0 W while the car takes 12 kW (15-11). Never used to decide
+        that a paused car charges again (a battery could fake that).
+        """
+        if self.load_kw is None:
+            return False
+        return self.load_kw >= 0.6 * self._charge_power_kw()
+
+    def _clear_stuck(self, reason: str | None) -> None:
+        if self._stuck_tries and reason:
+            _LOGGER.info("Laadplanner: laden komt op gang (%s)", reason)
+        if self._stuck_alerted and reason:
+            self.hass.async_create_task(self.hass.services.async_call(
+                "persistent_notification", "dismiss",
+                {"notification_id": "laadplanner_alert"}, blocking=False))
+        self._stuck_tries = 0
+        self._last_stuck_try = None
+        self._stuck_alerted = False
+
+    async def _check_stuck_start(self, entity_id: str, now: datetime) -> None:
+        """The switch reports 'on' but nothing flows: try again, then alert."""
+        if self._want_on_since is None:
+            return
+        if (now - self._want_on_since).total_seconds() < START_STUCK_S:
+            return
+        if (self._last_stuck_try is not None
+                and (now - self._last_stuck_try).total_seconds() < START_STUCK_RETRY_S):
+            return
+        car = self._state(CONF_CAR_STATUS)
+        car_text = car.state if car is not None else "onbekend"
+        if self._stuck_tries >= START_STUCK_TRIES:
+            if not self._stuck_alerted:
+                self._stuck_alerted = True
+                _LOGGER.warning(
+                    "Laadplanner: laadpaal staat aan maar de auto laadt niet (auto: %s). "
+                    "Steek de stekker opnieuw in.", car_text)
+                await self._alert(
+                    "Auto laadt niet",
+                    f"De laadpaal staat aan, maar er gaat geen stroom naar de auto "
+                    f"(auto meldt: {car_text}). Steek de stekker opnieuw in.",
+                )
+            return
+        self._stuck_tries += 1
+        self._last_stuck_try = now
+        _LOGGER.info("Laadplanner: paal 'aan' maar geen stroom (auto: %s); start opnieuw (poging %s)",
+                     car_text, self._stuck_tries)
+        entry = er.async_get(self.hass).async_get(entity_id)
+        platform = entry.platform if entry else None
+        if platform and self.hass.services.has_service(platform, "start_charging"):
+            await self.hass.services.async_call(
+                platform, "start_charging", {"entity_id": entity_id}, blocking=False)
+        button = self._button_ready(CONF_CAR_START)
+        if button is not None:
+            await self.hass.services.async_call(
+                "button", "press", {"entity_id": button}, blocking=False)
+        await self._ask_fast_updates(entity_id)
+
+    async def _alert(self, title: str, message: str) -> None:
+        """Tell the user: a notification in HA, and on the phone if set."""
+        await self.hass.services.async_call(
+            "persistent_notification", "create",
+            {"title": f"Laadplanner: {title}", "message": message,
+             "notification_id": "laadplanner_alert"},
+            blocking=False,
+        )
+        service = str(self.conf(CONF_NOTIFY) or "").strip()
+        if service.startswith("notify."):
+            service = service[len("notify."):]
+        if service and self.hass.services.has_service("notify", service):
+            await self.hass.services.async_call(
+                "notify", service, {"title": f"Laadplanner: {title}", "message": message},
+                blocking=False,
+            )
+
     async def _send(self, entity_id: str, on: bool, now: datetime,
                     reported_on: bool = True) -> None:
         attempt = 0 if on else (self._off_sends + 1 if self._commanded is False else 1)
@@ -761,6 +926,8 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Only remember the command once it was accepted.
         self._commanded = on
         self._commanded_at = now
+        if on:
+            self._want_on_since = now
         self._off_sends = attempt
         if on or attempt == 1:
             self._stop_warned = False
