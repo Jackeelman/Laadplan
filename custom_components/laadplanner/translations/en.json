@@ -25,7 +25,8 @@
           "battery_power_entity": "Home battery power (optional, W, + = discharging, - = charging)",
           "capacity_kwh": "Car battery capacity",
           "green_option": "Name of the green charge mode",
-          "manual_option": "Name of the manual charge mode"
+          "manual_option": "Name of the manual charge mode",
+          "notify_service": "Notify service for alerts (e.g. notify.mobile_app_phone, optional)"
         }
       }
     },
@@ -58,7 +59,8 @@
           "battery_power_entity": "Home battery power (optional, W, + = discharging, - = charging)",
           "capacity_kwh": "Car battery capacity",
           "green_option": "Name of the green charge mode",
-          "manual_option": "Name of the manual charge mode"
+          "manual_option": "Name of the manual charge mode",
+          "notify_service": "Notify service for alerts (e.g. notify.mobile_app_phone, optional)"
         }
       }
     }

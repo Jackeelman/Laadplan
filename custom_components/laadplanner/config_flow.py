@@ -27,6 +27,7 @@ from .const import (
     CONF_GREEN_OPTION,
     CONF_IMPORT,
     CONF_MANUAL_OPTION,
+    CONF_NOTIFY,
     CONF_PLUG,
     CONF_PRICE,
     CONF_SOC,
@@ -75,6 +76,8 @@ def _schema(values: dict[str, Any]) -> vol.Schema:
     )
     for key in (CONF_GREEN_OPTION, CONF_MANUAL_OPTION):
         fields[vol.Required(key, default=values.get(key, DEFAULTS[key]))] = selector.TextSelector()
+    fields[vol.Optional(CONF_NOTIFY, description={
+        "suggested_value": values.get(CONF_NOTIFY, DEFAULTS[CONF_NOTIFY])})] = selector.TextSelector()
     return vol.Schema(fields)
 
 
@@ -83,6 +86,7 @@ def _clean(user_input: dict[str, Any]) -> dict[str, Any]:
     data = dict(user_input)
     for key in OPTIONAL_ENTITIES:
         data.setdefault(key, "")
+    data.setdefault(CONF_NOTIFY, "")
     return data
 
 

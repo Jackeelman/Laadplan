@@ -32,6 +32,10 @@ MODE_QUARTERS = "kwartieren"  # charge only in chosen quarters
 MODE_DIRECT = "direct"        # charge now until target
 MODE_PREVIEW = "voorlopig"    # car not plugged in: plan shown, never steered
 
+# Sun share of the need to start topping up, and to keep topping up.
+TOPUP_ENTER = 0.25
+TOPUP_STAY = 0.15
+
 
 @dataclass
 class PriceSlot:
@@ -63,6 +67,7 @@ class PlanInput:
     night_end: time = time(7, 0)
     fallback_kwh: float = 10.0  # used when the SoC is unknown
     car_done: bool = False      # the car itself reports charging completed
+    prev_mode: str | None = None  # mode of the previous plan (for hysteresis)
 
 
 @dataclass
@@ -261,8 +266,12 @@ def make_plan(inp: PlanInput) -> Plan:
             expected_surplus_kwh=surplus,
         )
 
-    # Quarters needed for the part the sun will not cover.
-    if inp.strategy == STRATEGY_AUTO and surplus >= 0.2 * needed:
+    # Quarters needed for the part the sun will not cover. Hysteresis: the
+    # forecast and the need both move during the day, and flipping between
+    # top-up and quarters flips the charger between Green and Manual (seen
+    # 23-11: six flips in 1.5 h, each one starting or stopping the charger).
+    share = TOPUP_STAY if inp.prev_mode == MODE_SOLAR_TOPUP else TOPUP_ENTER
+    if inp.strategy == STRATEGY_AUTO and surplus >= share * needed:
         rest = needed - surplus
         rest_quarters = quarters_for(rest, inp.charge_power_kw)
         night_or_late = [s for s in candidates if s.date() == inp.deadline.date()

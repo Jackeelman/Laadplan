@@ -19,6 +19,17 @@ def auto_enable_custom_integrations(enable_custom_integrations):
     yield
 
 
+@pytest.fixture(autouse=True)
+def evening(freezer):
+    """Run every test at the same evening hour (test tz: US/Pacific).
+
+    Several tests assume "now" is before the night window; at the real
+    clock they failed during the Pacific night (09:00-16:00 in NL).
+    """
+    freezer.move_to("2026-11-20T04:00:00+00:00")  # 19-11 20:00 Pacific
+    yield
+
+
 def _states(hass: HomeAssistant, soc: str = "40") -> None:
     now = dt_util.now().replace(minute=0, second=0, microsecond=0)
     raw = [{"start": (now + timedelta(minutes=15 * i)).isoformat(),
@@ -739,3 +750,134 @@ async def test_pause_at_target_is_not_undone_before_deadline(hass: HomeAssistant
     assert hass.states.get("sensor.laadplanner_plan").state == "geen"
     assert press == []
     assert coordinator.car_paused_by_us
+
+
+# --- 23-11: new stop round per session, stuck start, mode hold ---------------
+
+async def _give_up(hass, freezer, entry):
+    """Charger keeps reporting 'on': five stops, then the planner goes quiet."""
+    off = async_mock_service(hass, "switch", "turn_off")
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")
+    coordinator = await _active(hass, entry, "kwartieren")
+    for _ in range(6):
+        freezer.tick(timedelta(minutes=2, seconds=1))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert len(off) == 5
+    return coordinator, off
+
+
+async def test_new_plug_in_gets_new_stop_round(hass: HomeAssistant, freezer) -> None:
+    """23-11 07:39: plugged in again after the planner gave up; it must stop
+    the new session instead of letting it charge past the target."""
+    entry = await _setup(hass)
+    coordinator, off = await _give_up(hass, freezer, entry)
+    freezer.tick(timedelta(minutes=5))
+    hass.states.async_set("binary_sensor.iq_ev_charger_1219_ingeplugd", "off")
+    freezer.tick(timedelta(seconds=30))
+    hass.states.async_set("binary_sensor.iq_ev_charger_1219_ingeplugd", "on")
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(off) == 6
+
+
+async def test_restarted_session_gets_new_stop_round(hass: HomeAssistant, freezer) -> None:
+    entry = await _setup(hass)
+    coordinator, off = await _give_up(hass, freezer, entry)
+    freezer.tick(timedelta(minutes=5))
+    hass.states.async_set("switch.iq_ev_charger_1219", "off")
+    freezer.tick(timedelta(seconds=30))
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")   # a new session
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(off) == 6
+
+
+async def test_stop_retried_after_half_hour_while_power_flows(hass: HomeAssistant, freezer) -> None:
+    entry = await _setup(hass)
+    coordinator, off = await _give_up(hass, freezer, entry)
+    hass.states.async_set("sensor.fordpass_jouw_vin_soc", "78")  # little left: no evening quarters
+    hass.states.async_set("sensor.iq_ev_charger_1219_vermogen", "3100",
+                          {"unit_of_measurement": "W"})
+    freezer.tick(timedelta(minutes=10))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(off) == 5                       # not yet: too soon
+    freezer.tick(timedelta(minutes=10))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(off) == 6
+
+
+async def test_no_new_round_when_nothing_flows(hass: HomeAssistant, freezer) -> None:
+    """Switch stuck on 'on' with 0 W (23-11 night): keep quiet, no log storm."""
+    entry = await _setup(hass)
+    coordinator, off = await _give_up(hass, freezer, entry)
+    for _ in range(4):
+        freezer.tick(timedelta(minutes=20))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert len(off) == 5
+
+
+async def test_stuck_start_retried_then_alerts(hass: HomeAssistant, freezer) -> None:
+    """23-11: car FAULT at plug-in, switch 'on', nothing flows all night."""
+    from homeassistant.helpers import entity_registry as er
+    er.async_get(hass).async_get_or_create(
+        "switch", "enphase_ev", "iq1219", suggested_object_id="iq_ev_charger_1219")
+    entry = await _setup(hass)
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.data, "notify_service": "notify.mobile_app_test"})
+    await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries("laadplanner")[0]
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")
+    hass.states.async_set(START, "unknown")
+    start = async_mock_service(hass, "enphase_ev", "start_charging")
+    async_mock_service(hass, "enphase_ev", "start_live_stream")
+    press = async_mock_service(hass, "button", "press")
+    note = async_mock_service(hass, "persistent_notification", "create")
+    push = async_mock_service(hass, "notify", "mobile_app_test")
+    on = async_mock_service(hass, "switch", "turn_on")
+    coordinator = await _active(hass, entry)            # direct: wants on
+    assert on == []                                     # switch already 'on'
+    for _ in range(20):
+        freezer.tick(timedelta(minutes=1))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert len(start) == 2
+    assert [c.data["entity_id"] for c in press] == [START, START]
+    assert len(note) == 1 and len(push) == 1
+    assert "opnieuw in" in push[0].data["message"]
+
+
+async def test_stuck_cleared_when_power_flows(hass: HomeAssistant, freezer) -> None:
+    entry = await _setup(hass)
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")
+    note = async_mock_service(hass, "persistent_notification", "create")
+    coordinator = await _active(hass, entry)
+    hass.states.async_set("sensor.iq_ev_charger_1219_vermogen", "10800",
+                          {"unit_of_measurement": "W"})
+    for _ in range(20):
+        freezer.tick(timedelta(minutes=1))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert note == []
+
+
+async def test_mode_not_flipped_within_hold(hass: HomeAssistant, freezer) -> None:
+    entry = await _setup(hass)
+    sel = async_mock_service(hass, "select", "select_option")
+    async_mock_service(hass, "switch", "turn_off")
+    coordinator = await _active(hass, entry, "zon")     # -> Groen
+    assert [c.data["option"] for c in sel] == ["Groen"]
+    hass.states.async_set("select.iq_ev_charger_1219_laadmodus", "Groen",
+                          {"options": ["Handmatig", "Gepland", "Groen"]})
+    freezer.tick(timedelta(minutes=5))
+    await coordinator.async_set("strategy", "kwartieren")   # not charging now
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert len(sel) == 1                                 # held
+    freezer.tick(timedelta(minutes=11))
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert [c.data["option"] for c in sel] == ["Groen", "Handmatig"]

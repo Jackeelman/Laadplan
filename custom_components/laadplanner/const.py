@@ -9,6 +9,12 @@ MIN_SWITCH_INTERVAL_S = 120  # never toggle the charger faster than this
 START_CONFIRM_S = 300        # the Enphase cloud may take this long to show a start
 STOP_RESEND_S = 120          # repeat "off" this often while charging still shows
 STOP_MAX_RESENDS = 5         # ... but not more often than this per stop
+STOP_ROUND_RETRY_S = 1800    # after giving up, try a new stop round this late
+                             # (only while power or the car shows real charging)
+START_STUCK_S = 360          # switch 'on' but nothing flows this long: stuck start
+START_STUCK_RETRY_S = 300    # retry a stuck start this often
+START_STUCK_TRIES = 2        # ... this many times, then alert the user
+MODE_HOLD_S = 900            # keep the charger mode at least this long
 # FordPass fallback: pause the car itself when the charger ignores "off"
 CAR_PAUSE_AFTER_S = 150      # after the first "off", wait this long for proof
 CAR_PAUSE_REPEAT_S = 300     # press pause again after this, if still charging
@@ -52,6 +58,7 @@ CONF_BATTERY_POWER = "battery_power_entity"
 CONF_CAPACITY = "capacity_kwh"
 CONF_GREEN_OPTION = "green_option"
 CONF_MANUAL_OPTION = "manual_option"
+CONF_NOTIFY = "notify_service"
 
 # Entity fields that may be left empty
 OPTIONAL_ENTITIES = (
@@ -88,6 +95,7 @@ DEFAULTS = {
     CONF_CAPACITY: 77.0,
     CONF_GREEN_OPTION: "Groen",
     CONF_MANUAL_OPTION: "Handmatig",
+    CONF_NOTIFY: "",
 }
 
 # Runtime settings (changed through the integration's own entities)
