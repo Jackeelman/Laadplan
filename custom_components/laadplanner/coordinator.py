@@ -85,6 +85,8 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+STOP_REASON_STILL = "laadt nog steeds"
+
 _BAD = (None, "", STATE_UNKNOWN, STATE_UNAVAILABLE)
 _PLUGGED_WORDS = {"on", "true", "connected", "plugged", "plugged_in",
                   "aangesloten", "ingeplugd", "charging", "laden"}
@@ -638,6 +640,10 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # it may stay paused until unplugged: un-pausing would let it
             # charge past the target while the charger ignores "off".)
             await self._press_car_start(now)
+        if plan.mode in (pl.MODE_PREVIEW, pl.MODE_IDLE, pl.MODE_SOLAR):
+            # Not asking for a start here: a later start must not inherit
+            # an old "wanted on since" and count as stuck right away.
+            self._want_on_since = None
         if plan.mode == pl.MODE_PREVIEW:
             return
         if plan.mode == pl.MODE_IDLE:
@@ -655,6 +661,7 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # between stay manual so the mode does not flip between quarters.
             if (not plan.slots or now < min(plan.slots)
                     or plan.next_start(now) is None):
+                self._want_on_since = None
                 await self._set_mode(green, now)
                 return
         charge_now = plan.charge_now(now)
@@ -740,7 +747,8 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     return  # car first; the charger follows next minute
             if self._want_on_since is None:
                 self._want_on_since = now
-            flowing = self._power_shows_charging() or self._car_says_charging_now()
+            flowing = (self._power_shows_charging() or self._car_says_charging_now(now)
+                       or self._p1_shows_car(now))
             if reported_on or flowing:
                 self._commanded = True
                 self._off_sends = 0
@@ -767,10 +775,13 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             reason = self._new_stop_round_reason(state, reported_on, now)
             if reason:
                 _LOGGER.info("Laadplanner: nieuwe stopronde (%s)", reason)
+                warned = self._stop_warned
                 self._commanded = None
                 self._off_sends = 0
                 self._off_sent_seen_on = True
                 await self._send(entity_id, False, now, reported_on)
+                if reason == STOP_REASON_STILL:
+                    self._stop_warned = warned  # same session: warn only once
                 return
             if reported_on and not self._off_sent_seen_on:
                 # Our stop went out before the cloud knew about the session
@@ -811,22 +822,37 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if reported_on and state.last_changed > started:
             return "laadpaal opnieuw gestart"
         if ((now - started).total_seconds() >= STOP_ROUND_RETRY_S
-                and (self._power_shows_charging() or self._car_says_charging_now())):
-            return "laadt nog steeds"
+                and (self._power_shows_charging() or self._car_says_charging_now(now))):
+            return STOP_REASON_STILL
         return None
 
-    def _car_says_charging_now(self) -> bool:
+    def _car_says_charging_now(self, now: datetime) -> bool:
         """The car reports charging, with data from the last 15 minutes."""
         state = self._state(CONF_CAR_STATUS)
         if state is None or state.state in _BAD:
             return False
         if str(state.state).lower() not in CAR_CHARGING_STATES:
             return False
-        return self._car_data_newer_than(dt_util.now() - timedelta(minutes=15), state)
+        return self._car_data_newer_than(now - timedelta(minutes=15), state)
+
+    def _p1_shows_car(self, now: datetime) -> bool:
+        """House + car load (P1 without the home battery) looks like the car.
+
+        Only used to keep quiet about a stuck start: the Enphase cloud can
+        report 0 W while the car takes 12 kW (15-11). Never used to decide
+        that a paused car charges again (a battery could fake that).
+        """
+        if self.load_kw is None:
+            return False
+        return self.load_kw >= 0.6 * self._charge_power_kw()
 
     def _clear_stuck(self, reason: str | None) -> None:
         if self._stuck_tries and reason:
             _LOGGER.info("Laadplanner: laden komt op gang (%s)", reason)
+        if self._stuck_alerted and reason:
+            self.hass.async_create_task(self.hass.services.async_call(
+                "persistent_notification", "dismiss",
+                {"notification_id": "laadplanner_alert"}, blocking=False))
         self._stuck_tries = 0
         self._last_stuck_try = None
         self._stuck_alerted = False
@@ -899,6 +925,8 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Only remember the command once it was accepted.
         self._commanded = on
         self._commanded_at = now
+        if on:
+            self._want_on_since = now
         self._off_sends = attempt
         if on or attempt == 1:
             self._stop_warned = False

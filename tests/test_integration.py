@@ -881,3 +881,61 @@ async def test_mode_not_flipped_within_hold(hass: HomeAssistant, freezer) -> Non
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     assert [c.data["option"] for c in sel] == ["Groen", "Handmatig"]
+
+
+async def test_stuck_timer_starts_fresh_after_sun(hass: HomeAssistant, freezer) -> None:
+    """Review #12: a start hours after a sun period is not 'stuck' at once."""
+    from homeassistant.helpers import entity_registry as er
+    er.async_get(hass).async_get_or_create(
+        "switch", "enphase_ev", "iq1219", suggested_object_id="iq_ev_charger_1219")
+    entry = await _setup(hass)
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")
+    start = async_mock_service(hass, "enphase_ev", "start_charging")
+    async_mock_service(hass, "enphase_ev", "start_live_stream")
+    async_mock_service(hass, "select", "select_option")
+    coordinator = await _active(hass, entry)            # wants on, 0 W
+    await coordinator.async_set("strategy", "zon")      # sun for hours
+    for _ in range(3):
+        freezer.tick(timedelta(hours=1))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    await coordinator.async_set("strategy", "direct")   # back: cloud still 0 W
+    for _ in range(5):
+        freezer.tick(timedelta(minutes=1))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert start == []
+
+
+async def test_p1_load_suppresses_stuck_alert(hass: HomeAssistant, freezer) -> None:
+    """15-11: cloud said 0 W while the car took 12 kW; P1 shows the truth."""
+    entry = await _setup(hass)
+    hass.states.async_set("switch.iq_ev_charger_1219", "on")
+    hass.states.async_set(BATTERY, "0", {"unit_of_measurement": "W"})
+    note = async_mock_service(hass, "persistent_notification", "create")
+    coordinator = await _active(hass, entry)
+    level = 1000.0
+    for _ in range(20):
+        freezer.tick(timedelta(minutes=1))
+        level += 0.18                                   # ~10.8 kW from the grid
+        hass.states.async_set(IMPORT, f"{level:.3f}")
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert note == []
+
+
+async def test_still_charging_rounds_warn_once(hass: HomeAssistant, freezer, caplog) -> None:
+    entry = await _setup(hass)
+    coordinator, off = await _give_up(hass, freezer, entry)
+    hass.states.async_set("sensor.fordpass_jouw_vin_soc", "78")
+    hass.states.async_set("sensor.iq_ev_charger_1219_vermogen", "3100",
+                          {"unit_of_measurement": "W"})
+    caplog.clear()
+    for _ in range(40):                                 # 80 minutes
+        freezer.tick(timedelta(minutes=2, seconds=1))
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert len(off) > 6                                 # new rounds were sent
+    warnings = [r for r in caplog.records
+                if r.levelname == "WARNING" and "nog te laden" in r.getMessage()]
+    assert warnings == []                               # already warned this session
