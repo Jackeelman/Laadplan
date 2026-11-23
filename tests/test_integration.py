@@ -939,3 +939,23 @@ async def test_still_charging_rounds_warn_once(hass: HomeAssistant, freezer, cap
     warnings = [r for r in caplog.records
                 if r.levelname == "WARNING" and "nog te laden" in r.getMessage()]
     assert warnings == []                               # already warned this session
+
+
+async def test_busy_house_does_not_block_start(hass: HomeAssistant, freezer) -> None:
+    """Review #12: house load on P1 must not count as 'already charging'."""
+    entry = await _setup(hass)
+    hass.states.async_set(BATTERY, "0", {"unit_of_measurement": "W"})
+    on = async_mock_service(hass, "switch", "turn_on")
+    coordinator = entry.runtime_data
+    level = 1000.0
+    for _ in range(2):                                  # ~3 kW house, no car
+        freezer.tick(timedelta(minutes=1))
+        level += 0.05
+        hass.states.async_set(IMPORT, f"{level:.3f}")
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert coordinator.load_kw and coordinator.load_kw > 2.5
+    hass.states.async_set("sensor.iq_ev_charger_1219_ampere_instellen", "6",
+                          {"safe_limit_active": True})
+    await _active(hass, entry)                          # direct, switch off
+    assert len(on) == 1

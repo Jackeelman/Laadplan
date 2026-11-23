@@ -747,12 +747,13 @@ class LaadplannerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     return  # car first; the charger follows next minute
             if self._want_on_since is None:
                 self._want_on_since = now
-            flowing = (self._power_shows_charging() or self._car_says_charging_now(now)
-                       or self._p1_shows_car(now))
+            flowing = self._power_shows_charging() or self._car_says_charging_now(now)
             if reported_on or flowing:
                 self._commanded = True
                 self._off_sends = 0
-                if flowing:
+                # P1 only quiets the stuck check; it must never stand in for
+                # a start (a busy house would then keep the car off).
+                if flowing or self._p1_shows_car(now):
                     self._clear_stuck("laadt")
                 else:
                     await self._check_stuck_start(entity_id, now)
